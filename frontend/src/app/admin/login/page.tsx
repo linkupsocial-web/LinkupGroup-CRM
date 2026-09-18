@@ -1,51 +1,65 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useAdminAuth } from '@/context/AdminAuthContext';
 import { adminFetch } from '@/lib/adminApi';
-import { HiOutlineLockClosed, HiOutlineMail, HiOutlineArrowRight } from 'react-icons/hi';
+import { HiOutlineLockClosed, HiOutlineMail, HiOutlineArrowRight, HiOutlineEye, HiOutlineEyeOff } from 'react-icons/hi';
 
 export default function AdminLoginPage() {
-  const { login } = useAdminAuth();
-  const [email, setEmail] = useState('admin@linkup.com');
-  const [password, setPassword] = useState('admin123');
+  const { login, isAuthenticated, loading: authLoading } = useAdminAuth();
+  const router = useRouter();
+  const [email, setEmail] = useState('');
+const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-
-    try {
-      const res = await adminFetch('/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (res.success && res.token) {
-        login(res.token, res.user);
-      } else {
-        setError(res.message || 'Login failed');
-      }
-    } catch (err: any) {
-      // Fallback mock login for offline testing
-      if (email === 'admin@linkup.com' && password === 'admin123') {
-        login('eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6Im1vY2tfYWRtaW5faWQiLCJpYXQiOjE1MTYyMzkwMjJ9.mock_signature', {
-
-          id: 'mock_admin_id',
-          name: 'Super Admin',
-          email: 'admin@linkup.com',
-          role: 'admin',
-          isSuperAdmin: true,
-        });
-      } else {
-        setError(err.message || 'Invalid credentials or connection error');
-      }
-    } finally {
-      setLoading(false);
+  // Already logged in → bounce to dashboard
+  useEffect(() => {
+    if (!authLoading && isAuthenticated) {
+      router.replace('/admin');
     }
-  };
+  }, [authLoading, isAuthenticated, router]);
+
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+
+  setLoading(true);
+  setError(null);
+
+  try {
+    const res = await adminFetch('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: email.trim(),
+        password,
+      }),
+    });
+
+    if (res.success && res.token && res.user) {
+      login(res.token, res.user);
+    } else {
+      setError(res.message || 'Login failed');
+    }
+  } catch (err: unknown) {
+    setError(err instanceof Error ? err.message : 'Invalid credentials or connection error');
+  } finally {
+    setLoading(false);
+  }
+};
+
+  if (authLoading) {
+    return (
+      <div className="w-full max-w-md p-8 flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-cyan-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (isAuthenticated) {
+    return null;
+  }
 
   return (
     <div className="w-full max-w-md p-6 sm:p-8 bg-white border border-slate-200 rounded-2xl shadow-lg space-y-6">
@@ -76,7 +90,7 @@ export default function AdminLoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full bg-slate-50 border border-slate-300 focus:border-cyan-600 rounded-xl pl-10 pr-3 py-2.5 text-sm font-semibold text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition-all shadow-xs"
-              placeholder="admin@linkup.com"
+              placeholder="Enter admin email"
             />
           </div>
         </div>
@@ -88,13 +102,22 @@ export default function AdminLoginPage() {
           <div className="relative">
             <HiOutlineLockClosed className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
-              type="password"
+              type={showPassword ? 'text' : 'password'}
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full bg-slate-50 border border-slate-300 focus:border-cyan-600 rounded-xl pl-10 pr-3 py-2.5 text-sm font-semibold text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition-all shadow-xs"
+              className="w-full bg-slate-50 border border-slate-300 focus:border-cyan-600 rounded-xl pl-10 pr-11 py-2.5 text-sm font-semibold text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/20 transition-all shadow-xs"
               placeholder="••••••••"
             />
+            <button
+              type="button"
+              onClick={() => setShowPassword((prev) => !prev)}
+              aria-label={showPassword ? 'Hide password' : 'Show password'}
+              title={showPassword ? 'Hide password' : 'Show password'}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-cyan-600 transition-colors cursor-pointer"
+            >
+              {showPassword ? <HiOutlineEyeOff className="w-5 h-5" /> : <HiOutlineEye className="w-5 h-5" />}
+            </button>
           </div>
         </div>
 
@@ -116,11 +139,7 @@ export default function AdminLoginPage() {
         </div>
       </form>
 
-      <div className="pt-4 border-t border-slate-200 text-center">
-        <p className="text-xs text-cyan-700 font-bold font-mono">
-          Default Superadmin: admin@linkup.com / admin123
-        </p>
-      </div>
+  
     </div>
   );
 }

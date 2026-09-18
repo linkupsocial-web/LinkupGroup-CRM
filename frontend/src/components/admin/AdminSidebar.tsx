@@ -119,7 +119,7 @@ export default function AdminSidebar({ isOpen, onClose }: AdminSidebarProps) {
               </div>
               <div className="truncate min-w-0">
                 <p className="text-xs font-bold text-slate-900 truncate">{user?.name || 'Administrator'}</p>
-                <p className="text-[11px] text-slate-500 font-medium truncate">{user?.email || 'admin@linkup.com'}</p>
+                <p className="text-[11px] text-slate-500 font-medium truncate">{user?.email || '—'}</p>
               </div>
             </div>
             <button

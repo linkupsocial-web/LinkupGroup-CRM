@@ -28,6 +28,7 @@ interface AdminAuthContextType {
   selectedCompany: Company | null;
   setSelectedCompany: (company: Company | null) => void;
   loading: boolean;
+  isAuthenticated: boolean;
   login: (token: string, user: AdminUser) => void;
   logout: () => void;
   refreshCompanies: () => Promise<void>;
@@ -46,56 +47,46 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   useEffect(() => {
     const initAuth = async () => {
-      let storedToken = getAuthToken();
+      const storedToken = getAuthToken();
 
-      // If no token exists, perform auto-login with default seeded admin credentials
+      // No token → unauthenticated. Never auto-login; send admin pages to /admin/login.
       if (!storedToken) {
-        try {
-          const loginRes = await adminFetch('/auth/login', {
-            method: 'POST',
-            body: JSON.stringify({ email: 'admin@linkup.com', password: 'admin123' })
-          });
-          if (loginRes.success && loginRes.token) {
-            setAuthToken(loginRes.token);
-            storedToken = loginRes.token;
-            setUser(loginRes.user);
-            setToken(storedToken);
+        setUser(null);
+        setToken(null);
+        setLoading(false);
+        if (pathname.startsWith('/admin') && pathname !== '/admin/login') {
+          router.replace('/admin/login');
+        }
+        return;
+      }
+
+      try {
+        const res = await adminFetch('/auth/me');
+        if (res.success && res.user) {
+          setUser(res.user);
+          setToken(storedToken);
+          await fetchCompanies();
+          if (pathname === '/admin/login') {
+            router.replace('/admin');
           }
-        } catch {
-          // If server auto-login fails, redirect to login page if on admin route
+        } else {
+          removeAuthToken();
+          setUser(null);
+          setToken(null);
           if (pathname.startsWith('/admin') && pathname !== '/admin/login') {
-            router.push('/admin/login');
+            router.replace('/admin/login');
           }
         }
-      }
-
-      if (storedToken) {
-        try {
-          const res = await adminFetch('/auth/me');
-          if (res.success && res.user) {
-            setUser(res.user);
-            setToken(storedToken);
-          }
-        } catch {
-          // Re-attempt auto-login
-          try {
-            const reloginRes = await adminFetch('/auth/login', {
-              method: 'POST',
-              body: JSON.stringify({ email: 'admin@linkup.com', password: 'admin123' })
-            });
-            if (reloginRes.success && reloginRes.token) {
-              setAuthToken(reloginRes.token);
-              setUser(reloginRes.user);
-              setToken(reloginRes.token);
-            }
-          } catch {
-            // if auto -login fails, redirect to login page if on admin route
-          }
+      } catch {
+        removeAuthToken();
+        setUser(null);
+        setToken(null);
+        if (pathname.startsWith('/admin') && pathname !== '/admin/login') {
+          router.replace('/admin/login');
         }
+      } finally {
+        setLoading(false);
       }
-
-      await fetchCompanies();
-      setLoading(false);
     };
 
     initAuth();
@@ -111,14 +102,8 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         }
       }
     } catch {
-      const fallbackComps: Company[] = [
-        { _id: 'social-1', name: 'Linkup Social', slug: 'linkup-social', code: 'SOCIAL', isVisible: true },
-        { _id: 'web-2', name: 'Linkup Web', slug: 'linkup-web', code: 'WEB', isVisible: true },
-        { _id: 'legal-3', name: 'Linkup Legal', slug: 'linkup-legal', code: 'LEGAL', isVisible: true },
-        { _id: 'finserv-4', name: 'Linkup Finserv', slug: 'linkup-finserv', code: 'FINSERV', isVisible: true },
-      ];
-      setCompanies(fallbackComps);
-      if (!selectedCompany) setSelectedCompany(fallbackComps[0]);
+      // Companies need a valid session — keep empty when unauthenticated / API unreachable
+      setCompanies([]);
     }
   };
 
@@ -126,17 +111,18 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setAuthToken(newToken);
     setToken(newToken);
     setUser(newUser);
+    setLoading(false);
     fetchCompanies();
-    router.push('/admin');
+    router.replace('/admin');
   };
 
   const logout = () => {
     removeAuthToken();
     setToken(null);
     setUser(null);
-    if (pathname.startsWith('/admin') && pathname !== '/admin/login') {
-      router.push('/admin/login');
-    }
+    setCompanies([]);
+    setSelectedCompany(null);
+    router.replace('/admin/login');
   };
 
   return (
@@ -148,6 +134,7 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         selectedCompany,
         setSelectedCompany,
         loading,
+        isAuthenticated: !!user && !!token,
         login,
         logout,
         refreshCompanies: fetchCompanies,

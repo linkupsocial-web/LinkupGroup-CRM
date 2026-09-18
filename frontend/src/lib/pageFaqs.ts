@@ -96,8 +96,11 @@ export function getPageFaqLabel(slug: PageFaqSlug): string {
  * Pages that must not render the shared F & Q section:
  *  - dashboard : overview screen only, it has no F & Q of its own
  *  - faqs      : already the dedicated FAQ manager with its own list
+ *  - seo       : SEO form page, no F & Q needed below
+ *  - users     : admin users & roles page, no F & Q needed below
+ *  - settings  : global settings page, no F & Q needed below
  */
-export const PAGE_FAQ_HIDDEN_SLUGS: PageFaqSlug[] = ['dashboard', 'faqs'];
+export const PAGE_FAQ_HIDDEN_SLUGS: PageFaqSlug[] = ['dashboard', 'faqs', 'seo', 'users', 'settings'];
 
 /** Whether the F & Q section should render for the given route. */
 export function shouldShowPageFaqs(pathname: string): boolean {

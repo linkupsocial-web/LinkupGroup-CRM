@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useAdminAuth } from '@/context/AdminAuthContext';
 import { adminFetch } from '@/lib/adminApi';
-import { HiOutlineUserGroup, HiOutlinePlus, HiOutlineShieldCheck, HiOutlineMail, HiOutlineX } from 'react-icons/hi';
+import { HiOutlineUserGroup, HiOutlinePlus, HiOutlineShieldCheck, HiOutlineMail, HiOutlineX, HiOutlineEye, HiOutlineEyeOff } from 'react-icons/hi';
 
 interface UserItem {
   _id: string;
@@ -20,6 +20,7 @@ export default function UsersAdminPage() {
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -40,7 +41,7 @@ export default function UsersAdminPage() {
         {
           _id: 'u1',
           name: user?.name || 'Super Admin',
-          email: user?.email || 'admin@linkup.com',
+          email: user?.email || '—',
           role: 'admin',
           isSuperAdmin: true,
           createdAt: new Date().toISOString()
@@ -64,6 +65,8 @@ export default function UsersAdminPage() {
         body: JSON.stringify(formData)
       });
       setIsModalOpen(false);
+      setShowPassword(false);
+      setFormData({ name: '', email: '', password: '', role: 'admin' });
       fetchUsers();
     } catch (err: any) {
       alert(err.message || 'Registration failed');
@@ -179,13 +182,24 @@ export default function UsersAdminPage() {
               </div>
               <div>
                 <label className="block text-base font-bold text-slate-800 mb-2">Password *</label>
-                <input
-                  type="password"
-                  required
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  className="w-full bg-slate-50 border-2 border-slate-300 rounded-xl px-4 py-3.5 text-base font-bold text-slate-900 focus:outline-none focus:border-cyan-600"
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    className="w-full bg-slate-50 border-2 border-slate-300 rounded-xl px-4 py-3.5 pr-12 text-base font-bold text-slate-900 focus:outline-none focus:border-cyan-600"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    title={showPassword ? 'Hide password' : 'Show password'}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-cyan-600 transition-colors cursor-pointer"
+                  >
+                    {showPassword ? <HiOutlineEyeOff className="w-5 h-5" /> : <HiOutlineEye className="w-5 h-5" />}
+                  </button>
+                </div>
               </div>
 
               <div className="flex justify-end gap-4 pt-5 border-t border-slate-200">
