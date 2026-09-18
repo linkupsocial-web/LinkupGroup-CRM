@@ -1,5 +1,5 @@
 export const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
+  process.env.NEXT_PUBLIC_API_URL || 'https://localhost:5000/api';
 
 export function getAuthToken(): string | null {
   if (typeof window !== 'undefined') {
