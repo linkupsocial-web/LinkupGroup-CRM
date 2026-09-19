@@ -3,7 +3,7 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const Blog = require('../models/Blog');
 const { protect } = require('../middleware/auth');
-const { articleCard, isEmbeddedDataUrl } = require('../utils/listPayload');
+const { articleCard, mediaOrigin, isEmbeddedDataUrl } = require('../utils/listPayload');
 
 // @route GET /api/blogs
 router.get('/', async (req, res) => {
@@ -30,7 +30,7 @@ router.get('/', async (req, res) => {
       .populate('companyId', 'name code slug')
       .sort({ publishDate: -1, createdAt: -1 })
       .lean();
-    res.json({ success: true, count: blogs.length, data: blogs.map((blog) => articleCard(blog, '/api/blogs')) });
+    res.json({ success: true, count: blogs.length, data: blogs.map((blog) => articleCard(blog, '/api/blogs', mediaOrigin(req))) });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -44,7 +44,7 @@ router.get('/:id/image', async (req, res) => {
     if (!blog || blog.isDeleted || !image) return res.status(404).end();
     if (!isEmbeddedDataUrl(image)) return res.redirect(image);
     const [metadata, encoded] = image.split(',', 2);
-    res.set('Cache-Control', 'public, max-age=86400');
+    res.set('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=60');
     res.type(metadata.match(/^data:([^;]+)/)?.[1] || 'image/jpeg').send(Buffer.from(encoded, 'base64'));
   } catch (err) { res.status(400).end(); }
 });

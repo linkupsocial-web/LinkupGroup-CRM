@@ -3,7 +3,7 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const Project = require('../models/Project');
 const { protect } = require('../middleware/auth');
-const { projectCard, isEmbeddedDataUrl } = require('../utils/listPayload');
+const { projectCard, mediaOrigin, isEmbeddedDataUrl } = require('../utils/listPayload');
 
 // @route GET /api/projects
 router.get('/', async (req, res) => {
@@ -27,7 +27,7 @@ router.get('/', async (req, res) => {
       .sort({ displayOrder: 1, createdAt: -1 })
       .lean();
 
-    res.json({ success: true, count: projects.length, data: projects.map((project) => projectCard(project, '/api/projects')) });
+    res.json({ success: true, count: projects.length, data: projects.map((project) => projectCard(project, '/api/projects', mediaOrigin(req))) });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -40,7 +40,7 @@ router.get('/:id/image', async (req, res) => {
     if (!item || item.isDeleted || !image) return res.status(404).end();
     if (!isEmbeddedDataUrl(image)) return res.redirect(image);
     const [metadata, encoded] = image.split(',', 2);
-    res.set('Cache-Control', 'public, max-age=86400');
+    res.set('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=60');
     res.type(metadata.match(/^data:([^;]+)/)?.[1] || 'image/jpeg').send(Buffer.from(encoded, 'base64'));
   } catch (err) { res.status(400).end(); }
 });

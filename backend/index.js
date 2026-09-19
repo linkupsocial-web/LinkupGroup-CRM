@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const compression = require('compression');
 const dotenv = require('dotenv');
 const connectDB = require('./config/db');
 
@@ -13,6 +14,7 @@ connectDB();
 // Middleware
 const allowedOrigins = [
   'http://localhost:4029',
+  'http://localhost:4028',
   'https://linkup-group-crm.vercel.app',
 ];
 
@@ -29,6 +31,35 @@ app.use(cors({
   },
   credentials: true,
 }));
+
+// Compress JSON, HTML and other text responses larger than 1 KB. Media files
+// already use their own compression, so the middleware leaves them untouched.
+app.use(compression({ threshold: 1024 }));
+
+// Keep browser-admin data fresh while allowing a CDN to serve public reads
+// quickly. Mutations and authenticated account/settings endpoints must never
+// be stored by a browser or intermediary cache.
+app.use('/api', (req, res, next) => {
+  const isReadRequest = req.method === 'GET' || req.method === 'HEAD';
+  const isPrivateRoute =
+    req.path === '/health' ||
+    req.path === '/settings' ||
+    req.path === '/companies/all' ||
+    req.path.startsWith('/auth');
+
+  if (!isReadRequest || isPrivateRoute) {
+    res.set('Cache-Control', 'no-store, max-age=0');
+  } else {
+    res.set(
+      'Cache-Control',
+      'public, max-age=0, s-maxage=300, stale-while-revalidate=60'
+    );
+  }
+
+  res.vary('Origin');
+  next();
+});
+
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
