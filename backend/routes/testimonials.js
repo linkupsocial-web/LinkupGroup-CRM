@@ -70,7 +70,7 @@ router.post('/', protect, async (req, res) => {
 // @route PUT /api/testimonials/:id
 router.put('/:id', protect, async (req, res) => {
   try {
-    const testimonial = await Testimonial.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const testimonial = await Testimonial.findByIdAndUpdate(req.params.id, req.body, { returnDocument: 'after', runValidators: true });
     if (!testimonial) return res.status(404).json({ success: false, message: 'Testimonial not found' });
     res.json({ success: true, data: testimonial });
   } catch (err) {
@@ -81,7 +81,7 @@ router.put('/:id', protect, async (req, res) => {
 // @route DELETE /api/testimonials/:id
 router.delete('/:id', protect, async (req, res) => {
   try {
-    const testimonial = await Testimonial.findByIdAndUpdate(req.params.id, { isDeleted: true }, { new: true });
+    const testimonial = await Testimonial.findByIdAndUpdate(req.params.id, { isDeleted: true }, { returnDocument: 'after' });
     if (!testimonial) return res.status(404).json({ success: false, message: 'Testimonial not found' });
     res.json({ success: true, message: 'Testimonial soft-deleted', data: testimonial });
   } catch (err) {

@@ -90,7 +90,11 @@ export default function FaqsAdminPage() {
     e.preventDefault();
     setSaving(true);
     try {
-      const payload = { ...formData, companyId: selectedCompany?._id || formData.companyId };
+      const payload = {
+        ...formData,
+        // Keep an existing FAQ in its company; selectedCompany is only the default for a new FAQ.
+        companyId: editingItem?.companyId || formData.companyId || selectedCompany?._id || ''
+      };
       if (editingItem?._id) {
         await adminFetch(`/faqs/${editingItem._id}`, { method: 'PUT', body: JSON.stringify(payload) });
       } else {

@@ -110,6 +110,42 @@ Get the Linkup Web `COMPANY_ID` from `GET /companies` by selecting the company w
 
 For the public Linkup Web site, do not send admin-only query parameters such as `includeAll=true` or `includeHidden=true`.
 
+## Project video
+
+Projects support a Cloudinary video URL in the full project record:
+
+```ts
+type ProjectDetail = {
+  _id: string;
+  projectTitle: string;
+  video?: string; // Cloudinary URL, or an empty string when no video exists
+};
+```
+
+`video` is intentionally omitted from `GET /projects` because video data does
+not belong in a fast project-card list. Fetch `GET /projects/:id` after a user
+opens a project, then render the video only when the field is present:
+
+```tsx
+const project = (await fetch(`${CMS_API_URL}/projects/${projectId}`)
+  .then((response) => response.json())).data;
+
+{project.video ? (
+  <video
+    src={project.video}
+    controls
+    playsInline
+    preload="metadata"
+    poster={project.cardImageUrl || project.thumbnail?.url}
+  />
+) : null}
+```
+
+The CRM uploads MP4, WEBM, MOV, and AVI files to Cloudinary through its project
+editor. The backend accepts files up to 50 MB. The Linkup Web frontend must use
+the returned URL as-is; it must not convert the video to base64 or fetch it
+through a JSON request.
+
 ## Recommended Linkup Web fetching
 
 Use a short revalidation period for public pages. This keeps the page quick and lets CRM changes appear shortly after publishing.

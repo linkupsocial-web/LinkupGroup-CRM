@@ -54,7 +54,7 @@ router.post('/', protect, async (req, res) => {
 // @route PUT /api/faqs/:id
 router.put('/:id', protect, async (req, res) => {
   try {
-    const faq = await FAQ.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const faq = await FAQ.findByIdAndUpdate(req.params.id, req.body, { returnDocument: 'after', runValidators: true });
     if (!faq) return res.status(404).json({ success: false, message: 'FAQ not found' });
     res.json({ success: true, data: faq });
   } catch (err) {
@@ -65,7 +65,7 @@ router.put('/:id', protect, async (req, res) => {
 // @route DELETE /api/faqs/:id
 router.delete('/:id', protect, async (req, res) => {
   try {
-    const faq = await FAQ.findByIdAndUpdate(req.params.id, { isDeleted: true }, { new: true });
+    const faq = await FAQ.findByIdAndUpdate(req.params.id, { isDeleted: true }, { returnDocument: 'after' });
     if (!faq) return res.status(404).json({ success: false, message: 'FAQ not found' });
     res.json({ success: true, message: 'FAQ soft-deleted', data: faq });
   } catch (err) {

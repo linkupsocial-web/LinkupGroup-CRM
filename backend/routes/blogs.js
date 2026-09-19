@@ -84,7 +84,7 @@ router.post('/', protect, async (req, res) => {
 // @route PUT /api/blogs/:id
 router.put('/:id', protect, async (req, res) => {
   try {
-    const blog = await Blog.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const blog = await Blog.findByIdAndUpdate(req.params.id, req.body, { returnDocument: 'after', runValidators: true });
     if (!blog) return res.status(404).json({ success: false, message: 'Blog post not found' });
     res.json({ success: true, data: blog });
   } catch (err) {
@@ -99,7 +99,7 @@ router.patch('/:id/status', protect, async (req, res) => {
     if (!['Draft', 'Publish', 'Hide'].includes(status)) {
       return res.status(400).json({ success: false, message: 'Invalid status' });
     }
-    const blog = await Blog.findByIdAndUpdate(req.params.id, { status }, { new: true });
+    const blog = await Blog.findByIdAndUpdate(req.params.id, { status }, { returnDocument: 'after' });
     if (!blog) return res.status(404).json({ success: false, message: 'Blog post not found' });
     res.json({ success: true, data: blog });
   } catch (err) {
@@ -110,7 +110,7 @@ router.patch('/:id/status', protect, async (req, res) => {
 // @route DELETE /api/blogs/:id
 router.delete('/:id', protect, async (req, res) => {
   try {
-    const blog = await Blog.findByIdAndUpdate(req.params.id, { isDeleted: true }, { new: true });
+    const blog = await Blog.findByIdAndUpdate(req.params.id, { isDeleted: true }, { returnDocument: 'after' });
     if (!blog) return res.status(404).json({ success: false, message: 'Blog post not found' });
     res.json({ success: true, message: 'Blog soft-deleted', data: blog });
   } catch (err) {

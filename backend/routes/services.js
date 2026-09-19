@@ -122,7 +122,7 @@ router.post('/', protect, async (req, res) => {
 // @route PUT /api/services/:id
 router.put('/:id', protect, async (req, res) => {
   try {
-    const service = await Service.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const service = await Service.findByIdAndUpdate(req.params.id, req.body, { returnDocument: 'after', runValidators: true });
     if (!service) return res.status(404).json({ success: false, message: 'Service not found' });
     res.json({ success: true, data: service });
   } catch (err) {
@@ -134,7 +134,7 @@ router.put('/:id', protect, async (req, res) => {
 router.patch('/:id/visibility', protect, async (req, res) => {
   try {
     const { isVisible } = req.body;
-    const service = await Service.findByIdAndUpdate(req.params.id, { isVisible }, { new: true });
+    const service = await Service.findByIdAndUpdate(req.params.id, { isVisible }, { returnDocument: 'after' });
     if (!service) return res.status(404).json({ success: false, message: 'Service not found' });
     res.json({ success: true, data: service });
   } catch (err) {
@@ -145,7 +145,7 @@ router.patch('/:id/visibility', protect, async (req, res) => {
 // @route DELETE /api/services/:id (Soft Delete)
 router.delete('/:id', protect, async (req, res) => {
   try {
-    const service = await Service.findByIdAndUpdate(req.params.id, { isDeleted: true }, { new: true });
+    const service = await Service.findByIdAndUpdate(req.params.id, { isDeleted: true }, { returnDocument: 'after' });
     if (!service) return res.status(404).json({ success: false, message: 'Service not found' });
     res.json({ success: true, message: 'Service soft-deleted', data: service });
   } catch (err) {
