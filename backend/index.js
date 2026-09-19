@@ -11,7 +11,24 @@ const app = express();
 connectDB();
 
 // Middleware
-app.use(cors({ origin: true, credentials: true }));
+const allowedOrigins = [
+  'http://localhost:4029',
+  'https://linkup-group-crm.vercel.app',
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // Postman, server-to-server requests etc.
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+}));
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
