@@ -3,6 +3,7 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const Project = require('../models/Project');
 const { protect } = require('../middleware/auth');
+const { projectCard, isEmbeddedDataUrl } = require('../utils/listPayload');
 
 // @route GET /api/projects
 router.get('/', async (req, res) => {
@@ -17,10 +18,38 @@ router.get('/', async (req, res) => {
     if (!includeHidden) filter.isVisible = true;
 
     const projects = await Project.find(filter)
+      .select('-longDescription -fullDescription -gallery -seo')
       .populate('companyId', 'name code slug')
-      .sort({ displayOrder: 1, createdAt: -1 });
+      .sort({ displayOrder: 1, createdAt: -1 })
+      .lean();
 
-    res.json({ success: true, count: projects.length, data: projects });
+    res.json({ success: true, count: projects.length, data: projects.map((project) => projectCard(project, '/api/projects')) });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.get('/:id/image', async (req, res) => {
+  try {
+    const item = await Project.findById(req.params.id).select('thumbnail isDeleted').lean();
+    const image = item?.thumbnail?.url;
+    if (!item || item.isDeleted || !isEmbeddedDataUrl(image)) return res.status(404).end();
+    const [metadata, encoded] = image.split(',', 2);
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.type(metadata.match(/^data:([^;]+)/)?.[1] || 'image/jpeg').send(Buffer.from(encoded, 'base64'));
+  } catch (err) { res.status(400).end(); }
+});
+
+// @route GET /api/projects/:id
+router.get('/:id', async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(404).json({ success: false, message: 'Project not found' });
+    }
+    const project = await Project.findOne({ _id: req.params.id, isDeleted: false })
+      .populate('companyId', 'name code slug');
+    if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
+    res.json({ success: true, data: project });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

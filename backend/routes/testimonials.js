@@ -3,6 +3,7 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const Testimonial = require('../models/Testimonial');
 const { protect } = require('../middleware/auth');
+const { testimonialCard, isEmbeddedDataUrl } = require('../utils/listPayload');
 
 // @route GET /api/testimonials
 router.get('/', async (req, res) => {
@@ -16,8 +17,35 @@ router.get('/', async (req, res) => {
     
     if (!includeHidden) filter.isVisible = true;
 
-    const testimonials = await Testimonial.find(filter).sort({ displayOrder: 1, createdAt: -1 });
-    res.json({ success: true, count: testimonials.length, data: testimonials });
+    const testimonials = await Testimonial.find(filter)
+      .sort({ displayOrder: 1, createdAt: -1 })
+      .lean();
+    res.json({ success: true, count: testimonials.length, data: testimonials.map((item) => testimonialCard(item, '/api/testimonials')) });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.get('/:id/image', async (req, res) => {
+  try {
+    const item = await Testimonial.findById(req.params.id).select('profileImage isDeleted').lean();
+    const image = item?.profileImage?.url;
+    if (!item || item.isDeleted || !isEmbeddedDataUrl(image)) return res.status(404).end();
+    const [metadata, encoded] = image.split(',', 2);
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.type(metadata.match(/^data:([^;]+)/)?.[1] || 'image/jpeg').send(Buffer.from(encoded, 'base64'));
+  } catch (err) { res.status(400).end(); }
+});
+
+// @route GET /api/testimonials/:id
+router.get('/:id', async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(404).json({ success: false, message: 'Testimonial not found' });
+    }
+    const testimonial = await Testimonial.findOne({ _id: req.params.id, isDeleted: false });
+    if (!testimonial) return res.status(404).json({ success: false, message: 'Testimonial not found' });
+    res.json({ success: true, data: testimonial });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }

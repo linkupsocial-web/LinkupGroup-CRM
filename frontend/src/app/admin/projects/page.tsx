@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useAdminAuth } from '@/context/AdminAuthContext';
-import { adminFetch } from '@/lib/adminApi';
+import { API_BASE, adminFetch } from '@/lib/adminApi';
 import ImageUploadInput from '@/components/admin/ImageUploadInput';
 import VideoUploadInput from '@/components/admin/VideoUploadInput';
 import SeoFormSection, { SEOFields } from '@/components/admin/SeoFormSection';
@@ -48,6 +48,7 @@ interface ProjectItem {
   video?: { url: string; publicId: string } | string;
   deliverables?: string[];
   thumbnail: { url: string; publicId: string };
+  cardImagePath?: string;
   gallery: { url: string; publicId: string }[];
   clientDetails: string;
   technologies: string[];
@@ -160,7 +161,17 @@ export default function ProjectsAdminPage() {
     return v.url || '';
   };
 
-  const handleOpenModal = (item?: ProjectItem) => {
+  const handleOpenModal = async (item?: ProjectItem) => {
+    if (item?._id) {
+      try {
+        const res = await adminFetch(`/projects/${item._id}`);
+        if (res.success && res.data) item = res.data;
+      } catch (err: any) {
+        alert(err.message || 'Could not load the full project');
+        return;
+      }
+    }
+
     if (item) {
       setEditingItem(item);
       const compId = typeof item.companyId === 'object' ? item.companyId._id : item.companyId;
@@ -221,6 +232,16 @@ export default function ProjectsAdminPage() {
       setDeliverablesInput('');
     }
     setIsModalOpen(true);
+  };
+
+  const handleViewProject = async (item: ProjectItem) => {
+    if (!item._id) return;
+    try {
+      const res = await adminFetch(`/projects/${item._id}`);
+      if (res.success && res.data) setViewingProject(res.data);
+    } catch (err: any) {
+      alert(err.message || 'Could not load the full project');
+    }
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -398,6 +419,9 @@ export default function ProjectsAdminPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredProjects.map((project) => {
             const vUrl = getVideoUrlStr(project.video);
+            const thumbnailUrl = project.cardImagePath
+              ? `${API_BASE}${project.cardImagePath.replace(/^\/api/, '')}`
+              : project.thumbnail?.url;
             return (
               <div
                 key={project._id || project.slug || project.projectTitle}
@@ -415,8 +439,8 @@ export default function ProjectsAdminPage() {
                         loop
                         className="w-full h-full object-cover"
                       />
-                    ) : project.thumbnail?.url ? (
-                      <img src={project.thumbnail.url} alt={project.projectTitle || project.title} className="w-full h-full object-cover" />
+                    ) : thumbnailUrl ? (
+                      <img src={thumbnailUrl} alt={project.projectTitle || project.title} className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center font-bold text-slate-500 text-lg bg-slate-100">
                         NO MEDIA PROVIDED
@@ -502,7 +526,7 @@ export default function ProjectsAdminPage() {
                 <div className="p-6 pt-0 border-t border-slate-100 mt-4 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => setViewingProject(project)}
+                      onClick={() => handleViewProject(project)}
                       className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-cyan-50 hover:bg-cyan-100 text-cyan-800 font-extrabold text-xs border border-cyan-200 transition-colors cursor-pointer"
                     >
                       <HiOutlineEye className="w-4 h-4 text-cyan-600" />
@@ -560,7 +584,7 @@ export default function ProjectsAdminPage() {
               {filteredProjects.map((p) => (
                 <tr key={p._id || p.slug || p.projectTitle} className="hover:bg-slate-50 transition-colors">
                   <td
-                    onClick={() => setViewingProject(p)}
+                    onClick={() => handleViewProject(p)}
                     className="p-4 font-black text-slate-900 cursor-pointer hover:text-cyan-700 transition-colors"
                   >
                     <div>
@@ -574,7 +598,7 @@ export default function ProjectsAdminPage() {
                   <td className="p-4 text-center font-bold">{p.isVisible ? 'Visible' : 'Hidden'}</td>
                   <td className="p-4 text-right space-x-2">
                     <button
-                      onClick={() => setViewingProject(p)}
+                      onClick={() => handleViewProject(p)}
                       className="p-2 bg-cyan-50 rounded-lg text-cyan-800 hover:bg-cyan-100 border border-cyan-200"
                       title="View Details"
                     >

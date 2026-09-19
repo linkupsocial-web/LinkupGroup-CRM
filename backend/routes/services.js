@@ -3,6 +3,7 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const Service = require('../models/Service');
 const { protect } = require('../middleware/auth');
+const { serviceCard, isEmbeddedDataUrl } = require('../utils/listPayload');
 
 // @route GET /api/services?companyId=...
 router.get('/', async (req, res) => {
@@ -26,11 +27,13 @@ router.get('/', async (req, res) => {
     }
 
     const services = await Service.find(filter)
+      .select('-fullDescription -faqs -processSteps -features -pricing -cta -seo')
       .populate('companyId', 'name code slug')
       .populate('parentServiceId', 'serviceName title slug')
-      .sort({ displayOrder: 1, createdAt: -1 });
+      .sort({ displayOrder: 1, createdAt: -1 })
+      .lean();
 
-    res.json({ success: true, count: services.length, data: services });
+    res.json({ success: true, count: services.length, data: services.map((service) => serviceCard(service, '/api/services')) });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -55,13 +58,26 @@ router.get('/:id/locations', async (req, res) => {
       parentServiceId: parentService._id,
       isDeleted: false
     })
+      .select('-fullDescription -faqs -processSteps -features -pricing -cta -seo')
       .populate('companyId', 'name code slug')
-      .sort({ displayOrder: 1, createdAt: -1 });
+      .sort({ displayOrder: 1, createdAt: -1 })
+      .lean();
 
-    res.json({ success: true, count: locationServices.length, data: locationServices });
+    res.json({ success: true, count: locationServices.length, data: locationServices.map((service) => serviceCard(service, '/api/services')) });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
+});
+
+router.get('/:id/image', async (req, res) => {
+  try {
+    const item = await Service.findById(req.params.id).select('image imageUrl isDeleted').lean();
+    const image = item?.image?.url || item?.imageUrl;
+    if (!item || item.isDeleted || !isEmbeddedDataUrl(image)) return res.status(404).end();
+    const [metadata, encoded] = image.split(',', 2);
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.type(metadata.match(/^data:([^;]+)/)?.[1] || 'image/jpeg').send(Buffer.from(encoded, 'base64'));
+  } catch (err) { res.status(400).end(); }
 });
 
 // @route GET /api/services/:id

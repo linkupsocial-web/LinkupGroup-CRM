@@ -3,6 +3,7 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const CaseStudy = require('../models/CaseStudy');
 const { protect } = require('../middleware/auth');
+const { articleCard, isEmbeddedDataUrl } = require('../utils/listPayload');
 
 // @route GET /api/case-studies
 router.get('/', async (req, res) => {
@@ -20,11 +21,26 @@ router.get('/', async (req, res) => {
       filter.status = 'Publish';
     }
 
-    const caseStudies = await CaseStudy.find(filter).populate('companyId', 'name code slug').sort({ publishDate: -1, createdAt: -1 });
-    res.json({ success: true, count: caseStudies.length, data: caseStudies });
+    const caseStudies = await CaseStudy.find(filter)
+      .select('-content -seo')
+      .populate('companyId', 'name code slug')
+      .sort({ publishDate: -1, createdAt: -1 })
+      .lean();
+    res.json({ success: true, count: caseStudies.length, data: caseStudies.map((item) => articleCard(item, '/api/case-studies')) });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
+});
+
+router.get('/:id/image', async (req, res) => {
+  try {
+    const item = await CaseStudy.findById(req.params.id).select('image imageUrl featuredImage isDeleted').lean();
+    const image = item?.featuredImage?.url || item?.image || item?.imageUrl;
+    if (!item || item.isDeleted || !isEmbeddedDataUrl(image)) return res.status(404).end();
+    const [metadata, encoded] = image.split(',', 2);
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.type(metadata.match(/^data:([^;]+)/)?.[1] || 'image/jpeg').send(Buffer.from(encoded, 'base64'));
+  } catch (err) { res.status(400).end(); }
 });
 
 // @route GET /api/case-studies/:id

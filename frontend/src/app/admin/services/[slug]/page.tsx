@@ -210,8 +210,18 @@ export default function ServiceDetailPage({ params }: { params: Promise<{ slug: 
     fetchService();
   }, [slug]);
 
-  const handleOpenLocationModal = (item?: LocationServiceItem) => {
+  const handleOpenLocationModal = async (item?: LocationServiceItem) => {
     if (!service) return;
+
+    if (item?._id) {
+      try {
+        const res = await adminFetch(`/services/${item._id}`);
+        if (res.success && res.data) item = res.data;
+      } catch (err: any) {
+        alert(err.message || 'Could not load the full location service');
+        return;
+      }
+    }
 
     if (item) {
       setEditingLocationItem(item);
