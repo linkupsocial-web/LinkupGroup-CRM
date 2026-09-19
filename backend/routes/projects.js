@@ -8,7 +8,7 @@ const { projectCard, isEmbeddedDataUrl } = require('../utils/listPayload');
 // @route GET /api/projects
 router.get('/', async (req, res) => {
   try {
-    const { companyId, includeHidden } = req.query;
+    const { companyId, includeHidden, summary } = req.query;
     const filter = { isDeleted: false };
     
     if (companyId && companyId !== 'all' && mongoose.Types.ObjectId.isValid(companyId)) {
@@ -16,9 +16,13 @@ router.get('/', async (req, res) => {
     }
     
     if (!includeHidden) filter.isVisible = true;
+    if (summary === 'true') {
+      const count = await Project.countDocuments(filter);
+      return res.json({ success: true, count, data: [] });
+    }
 
     const projects = await Project.find(filter)
-      .select('-longDescription -fullDescription -gallery -seo')
+      .select('-longDescription -fullDescription -gallery -seo -video -thumbnail')
       .populate('companyId', 'name code slug')
       .sort({ displayOrder: 1, createdAt: -1 })
       .lean();
@@ -33,7 +37,8 @@ router.get('/:id/image', async (req, res) => {
   try {
     const item = await Project.findById(req.params.id).select('thumbnail isDeleted').lean();
     const image = item?.thumbnail?.url;
-    if (!item || item.isDeleted || !isEmbeddedDataUrl(image)) return res.status(404).end();
+    if (!item || item.isDeleted || !image) return res.status(404).end();
+    if (!isEmbeddedDataUrl(image)) return res.redirect(image);
     const [metadata, encoded] = image.split(',', 2);
     res.set('Cache-Control', 'public, max-age=86400');
     res.type(metadata.match(/^data:([^;]+)/)?.[1] || 'image/jpeg').send(Buffer.from(encoded, 'base64'));

@@ -60,4 +60,6 @@ ProjectSchema.pre('save', function () {
   if (this.fullDescription && !this.longDescription) this.longDescription = this.fullDescription;
 });
 
+ProjectSchema.index({ companyId: 1, isDeleted: 1, isVisible: 1, displayOrder: 1, createdAt: -1 });
+
 module.exports = mongoose.models.Project || mongoose.model('Project', ProjectSchema);

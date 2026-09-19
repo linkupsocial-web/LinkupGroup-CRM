@@ -92,5 +92,7 @@ ServiceSchema.pre('save', function () {
 });
 
 ServiceSchema.index({ companyId: 1, slug: 1 }, { unique: true });
+ServiceSchema.index({ companyId: 1, isDeleted: 1, isVisible: 1, displayOrder: 1, createdAt: -1 });
+ServiceSchema.index({ parentServiceId: 1, isDeleted: 1, displayOrder: 1, createdAt: -1 });
 
 module.exports = mongoose.models.Service || mongoose.model('Service', ServiceSchema);

@@ -16,4 +16,6 @@ const TestimonialSchema = new mongoose.Schema({
   displayOrder: { type: Number, default: 0 }
 }, { timestamps: true });
 
+TestimonialSchema.index({ companyId: 1, isDeleted: 1, isVisible: 1, displayOrder: 1, createdAt: -1 });
+
 module.exports = mongoose.models.Testimonial || mongoose.model('Testimonial', TestimonialSchema);

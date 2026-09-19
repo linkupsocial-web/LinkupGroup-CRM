@@ -8,7 +8,7 @@ const { articleCard, isEmbeddedDataUrl } = require('../utils/listPayload');
 // @route GET /api/case-studies
 router.get('/', async (req, res) => {
   try {
-    const { companyId, status, includeAll } = req.query;
+    const { companyId, status, includeAll, summary } = req.query;
     const filter = { isDeleted: false };
     
     if (companyId && companyId !== 'all' && mongoose.Types.ObjectId.isValid(companyId)) {
@@ -20,9 +20,13 @@ router.get('/', async (req, res) => {
     } else if (!includeAll) {
       filter.status = 'Publish';
     }
+    if (summary === 'true') {
+      const count = await CaseStudy.countDocuments(filter);
+      return res.json({ success: true, count, data: [] });
+    }
 
     const caseStudies = await CaseStudy.find(filter)
-      .select('-content -seo')
+      .select('-content -seo -image -imageUrl -featuredImage')
       .populate('companyId', 'name code slug')
       .sort({ publishDate: -1, createdAt: -1 })
       .lean();
@@ -36,7 +40,8 @@ router.get('/:id/image', async (req, res) => {
   try {
     const item = await CaseStudy.findById(req.params.id).select('image imageUrl featuredImage isDeleted').lean();
     const image = item?.featuredImage?.url || item?.image || item?.imageUrl;
-    if (!item || item.isDeleted || !isEmbeddedDataUrl(image)) return res.status(404).end();
+    if (!item || item.isDeleted || !image) return res.status(404).end();
+    if (!isEmbeddedDataUrl(image)) return res.redirect(image);
     const [metadata, encoded] = image.split(',', 2);
     res.set('Cache-Control', 'public, max-age=86400');
     res.type(metadata.match(/^data:([^;]+)/)?.[1] || 'image/jpeg').send(Buffer.from(encoded, 'base64'));
