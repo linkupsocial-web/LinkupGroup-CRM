@@ -3,7 +3,7 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const Testimonial = require('../models/Testimonial');
 const { protect } = require('../middleware/auth');
-const { testimonialCard, isEmbeddedDataUrl } = require('../utils/listPayload');
+const { testimonialCard, mediaOrigin, isEmbeddedDataUrl } = require('../utils/listPayload');
 
 // @route GET /api/testimonials
 router.get('/', async (req, res) => {
@@ -25,7 +25,7 @@ router.get('/', async (req, res) => {
       .select('-profileImage')
       .sort({ displayOrder: 1, createdAt: -1 })
       .lean();
-    res.json({ success: true, count: testimonials.length, data: testimonials.map((item) => testimonialCard(item, '/api/testimonials')) });
+    res.json({ success: true, count: testimonials.length, data: testimonials.map((item) => testimonialCard(item, '/api/testimonials', mediaOrigin(req))) });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -38,7 +38,7 @@ router.get('/:id/image', async (req, res) => {
     if (!item || item.isDeleted || !image) return res.status(404).end();
     if (!isEmbeddedDataUrl(image)) return res.redirect(image);
     const [metadata, encoded] = image.split(',', 2);
-    res.set('Cache-Control', 'public, max-age=86400');
+    res.set('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=60');
     res.type(metadata.match(/^data:([^;]+)/)?.[1] || 'image/jpeg').send(Buffer.from(encoded, 'base64'));
   } catch (err) { res.status(400).end(); }
 });
