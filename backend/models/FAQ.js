@@ -14,5 +14,6 @@ const FAQSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 FAQSchema.index({ companyId: 1, pageSlug: 1, displayOrder: 1 });
+FAQSchema.index({ companyId: 1, pageSlug: 1, isDeleted: 1, isVisible: 1, displayOrder: 1 });
 
 module.exports = mongoose.models.FAQ || mongoose.model('FAQ', FAQSchema);

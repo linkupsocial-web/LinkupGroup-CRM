@@ -8,7 +8,7 @@ const { serviceCard, isEmbeddedDataUrl } = require('../utils/listPayload');
 // @route GET /api/services?companyId=...
 router.get('/', async (req, res) => {
   try {
-    const { companyId, includeHidden, parentServiceId, includeLocationServices } = req.query;
+    const { companyId, includeHidden, parentServiceId, includeLocationServices, summary } = req.query;
     const filter = { isDeleted: false };
     
     if (companyId && companyId !== 'all' && mongoose.Types.ObjectId.isValid(companyId)) {
@@ -25,9 +25,13 @@ router.get('/', async (req, res) => {
       // By default, exclude location-specific services to keep main services clean and separated
       filter.$or = [{ parentServiceId: null }, { parentServiceId: { $exists: false } }, { isLocationService: false }];
     }
+    if (summary === 'true') {
+      const count = await Service.countDocuments(filter);
+      return res.json({ success: true, count, data: [] });
+    }
 
     const services = await Service.find(filter)
-      .select('-fullDescription -faqs -processSteps -features -pricing -cta -seo')
+      .select('-fullDescription -faqs -processSteps -features -pricing -cta -seo -image -imageUrl')
       .populate('companyId', 'name code slug')
       .populate('parentServiceId', 'serviceName title slug')
       .sort({ displayOrder: 1, createdAt: -1 })
@@ -73,7 +77,8 @@ router.get('/:id/image', async (req, res) => {
   try {
     const item = await Service.findById(req.params.id).select('image imageUrl isDeleted').lean();
     const image = item?.image?.url || item?.imageUrl;
-    if (!item || item.isDeleted || !isEmbeddedDataUrl(image)) return res.status(404).end();
+    if (!item || item.isDeleted || !image) return res.status(404).end();
+    if (!isEmbeddedDataUrl(image)) return res.redirect(image);
     const [metadata, encoded] = image.split(',', 2);
     res.set('Cache-Control', 'public, max-age=86400');
     res.type(metadata.match(/^data:([^;]+)/)?.[1] || 'image/jpeg').send(Buffer.from(encoded, 'base64'));

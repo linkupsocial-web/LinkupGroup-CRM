@@ -8,8 +8,7 @@ const imageCard = (image = {}) => ({
   publicId: image.publicId || ''
 });
 
-const cardImagePath = (value, path) =>
-  isEmbeddedDataUrl(value) ? path : '';
+const cardImagePath = (_value, path) => path || '';
 
 const articleCard = (item, basePath) => ({
   _id: item._id,

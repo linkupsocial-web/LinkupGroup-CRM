@@ -62,5 +62,6 @@ CaseStudySchema.pre('save', function () {
 });
 
 CaseStudySchema.index({ companyId: 1, slug: 1 }, { unique: true });
+CaseStudySchema.index({ companyId: 1, isDeleted: 1, status: 1, publishDate: -1, createdAt: -1 });
 
 module.exports = mongoose.models.CaseStudy || mongoose.model('CaseStudy', CaseStudySchema);

@@ -7,7 +7,7 @@ const { protect } = require('../middleware/auth');
 // @route GET /api/faqs
 router.get('/', async (req, res) => {
   try {
-    const { companyId, includeHidden, pageSlug, includePageFaqs } = req.query;
+    const { companyId, includeHidden, pageSlug, includePageFaqs, summary } = req.query;
     const filter = { isDeleted: false };
     
     if (companyId && companyId !== 'all' && mongoose.Types.ObjectId.isValid(companyId)) {
@@ -29,6 +29,10 @@ router.get('/', async (req, res) => {
     }
     
     if (!includeHidden) filter.isVisible = true;
+    if (summary === 'true') {
+      const count = await FAQ.countDocuments(filter);
+      return res.json({ success: true, count, data: [] });
+    }
 
     const faqs = await FAQ.find(filter).sort({ displayOrder: 1, createdAt: -1 });
     res.json({ success: true, count: faqs.length, data: faqs });

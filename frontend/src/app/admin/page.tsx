@@ -38,7 +38,7 @@ export default function AdminDashboardPage() {
 
       try {
         const statsPromises = companies.map(async (comp) => {
-          const query = `?companyId=${comp._id}&includeHidden=true`;
+          const query = `?companyId=${comp._id}&includeHidden=true&summary=true`;
           const [sRes, pRes, bRes, csRes, tRes, fRes] = await Promise.allSettled([
             adminFetch(`/services${query}`),
             adminFetch(`/projects${query}`),
