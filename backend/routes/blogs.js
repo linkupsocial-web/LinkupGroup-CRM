@@ -3,6 +3,7 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const Blog = require('../models/Blog');
 const { protect } = require('../middleware/auth');
+const { articleCard, isEmbeddedDataUrl } = require('../utils/listPayload');
 
 // @route GET /api/blogs
 router.get('/', async (req, res) => {
@@ -20,11 +21,27 @@ router.get('/', async (req, res) => {
       filter.status = 'Publish';
     }
 
-    const blogs = await Blog.find(filter).populate('companyId', 'name code slug').sort({ publishDate: -1, createdAt: -1 });
-    res.json({ success: true, count: blogs.length, data: blogs });
+    const blogs = await Blog.find(filter)
+      .select('-content -seo')
+      .populate('companyId', 'name code slug')
+      .sort({ publishDate: -1, createdAt: -1 })
+      .lean();
+    res.json({ success: true, count: blogs.length, data: blogs.map((blog) => articleCard(blog, '/api/blogs')) });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
+});
+
+// @route GET /api/blogs/:id/image (lazy card image for legacy data URLs)
+router.get('/:id/image', async (req, res) => {
+  try {
+    const blog = await Blog.findById(req.params.id).select('image imageUrl featuredImage isDeleted').lean();
+    const image = blog?.featuredImage?.url || blog?.image || blog?.imageUrl;
+    if (!blog || blog.isDeleted || !isEmbeddedDataUrl(image)) return res.status(404).end();
+    const [metadata, encoded] = image.split(',', 2);
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.type(metadata.match(/^data:([^;]+)/)?.[1] || 'image/jpeg').send(Buffer.from(encoded, 'base64'));
+  } catch (err) { res.status(400).end(); }
 });
 
 // @route GET /api/blogs/:id

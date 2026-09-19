@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useAdminAuth } from '@/context/AdminAuthContext';
-import { adminFetch } from '@/lib/adminApi';
+import { API_BASE, adminFetch } from '@/lib/adminApi';
 import ImageUploadInput from '@/components/admin/ImageUploadInput';
 import {
   HiOutlinePlus,
@@ -19,6 +19,7 @@ interface TestimonialItem {
   companyName: string;
   designation: string;
   profileImage: { url: string; publicId: string };
+  cardImagePath?: string;
   review: string;
   rating: number;
   isVisible: boolean;
@@ -77,7 +78,17 @@ export default function TestimonialsAdminPage() {
     fetchItems();
   }, [selectedCompany]);
 
-  const handleOpenModal = (item?: TestimonialItem) => {
+  const handleOpenModal = async (item?: TestimonialItem) => {
+    if (item?._id) {
+      try {
+        const res = await adminFetch(`/testimonials/${item._id}`);
+        if (res.success && res.data) item = res.data;
+      } catch (err: any) {
+        alert(err.message || 'Could not load the full testimonial');
+        return;
+      }
+    }
+
     if (item) {
       setEditingItem(item);
       setFormData(item);
@@ -157,8 +168,8 @@ export default function TestimonialsAdminPage() {
                 <div className="flex items-center justify-between mb-4">
                   <div className="flex items-center gap-3.5">
                     <div className="w-12 h-12 rounded-full bg-slate-100 overflow-hidden flex-shrink-0 border-2 border-slate-300">
-                      {item.profileImage?.url ? (
-                        <img src={item.profileImage.url} alt={item.clientName} className="w-full h-full object-cover" />
+                      {(item.cardImagePath || item.profileImage?.url) ? (
+                        <img src={item.cardImagePath ? `${API_BASE}${item.cardImagePath.replace(/^\/api/, '')}` : item.profileImage.url} alt={item.clientName} className="w-full h-full object-cover" />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center font-bold text-cyan-700 text-base">
                           {item.clientName[0]}

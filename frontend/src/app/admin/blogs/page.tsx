@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAdminAuth } from '@/context/AdminAuthContext';
-import { adminFetch } from '@/lib/adminApi';
+import { API_BASE, adminFetch } from '@/lib/adminApi';
 import ImageUploadInput from '@/components/admin/ImageUploadInput';
 import SeoFormSection, { SEOFields } from '@/components/admin/SeoFormSection';
 import RichTextEditor from '@/components/admin/RichTextEditor';
@@ -32,6 +32,7 @@ interface BlogItem {
   featuredImage: { url: string; publicId: string };
   image?: string;
   imageUrl?: string;
+  cardImagePath?: string;
   shortDescription: string;
   excerpt?: string;
   content: string | string[];
@@ -187,7 +188,17 @@ export default function BlogsAdminPage() {
     );
   };
 
-  const handleOpenModal = (item?: BlogItem) => {
+  const handleOpenModal = async (item?: BlogItem) => {
+    if (item?._id) {
+      try {
+        const res = await adminFetch(`/blogs/${item._id}`);
+        if (res.success && res.data) item = res.data;
+      } catch (err: any) {
+        alert(err.message || 'Could not load the full blog post');
+        return;
+      }
+    }
+
     if (item) {
       setEditingItem(item);
       let contentStr = '';
@@ -422,7 +433,9 @@ export default function BlogsAdminPage() {
         /* CARD GRID VIEW */
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredBlogs.map((blog) => {
-            const imgUrl = blog.featuredImage?.url || blog.image || blog.imageUrl;
+            const imgUrl = blog.cardImagePath
+              ? `${API_BASE}${blog.cardImagePath.replace(/^\/api/, '')}`
+              : blog.featuredImage?.url || blog.image || blog.imageUrl;
             return (
               <div
                 key={blog._id || blog.slug || blog.title}
@@ -570,7 +583,9 @@ export default function BlogsAdminPage() {
             </thead>
             <tbody className="divide-y divide-slate-200">
               {filteredBlogs.map((blog) => {
-                const imgUrl = blog.featuredImage?.url || blog.image || blog.imageUrl;
+                const imgUrl = blog.cardImagePath
+                  ? `${API_BASE}${blog.cardImagePath.replace(/^\/api/, '')}`
+                  : blog.featuredImage?.url || blog.image || blog.imageUrl;
                 return (
                   <tr key={blog._id || blog.slug || blog.title} className="hover:bg-slate-50 transition-colors">
                     <td className="p-4">

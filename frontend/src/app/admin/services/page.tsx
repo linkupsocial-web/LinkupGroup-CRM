@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAdminAuth } from '@/context/AdminAuthContext';
-import { adminFetch } from '@/lib/adminApi';
+import { API_BASE, adminFetch } from '@/lib/adminApi';
 import ImageUploadInput from '@/components/admin/ImageUploadInput';
 import SeoFormSection, { SEOFields } from '@/components/admin/SeoFormSection';
 import RichTextEditor from '@/components/admin/RichTextEditor';
@@ -52,6 +52,7 @@ interface ServiceItem {
   image?: { url: string; publicId: string };
   imageUrl?: string;
   imageAlt?: string;
+  cardImagePath?: string;
   featured: boolean;
   isVisible: boolean;
   displayOrder: number;
@@ -187,7 +188,17 @@ export default function ServicesAdminPage() {
     );
   };
 
-  const handleOpenModal = (item?: ServiceItem) => {
+  const handleOpenModal = async (item?: ServiceItem) => {
+    if (item?._id) {
+      try {
+        const res = await adminFetch(`/services/${item._id}`);
+        if (res.success && res.data) item = res.data;
+      } catch (err: any) {
+        alert(err.message || 'Could not load the full service');
+        return;
+      }
+    }
+
     if (item) {
       setEditingItem(item);
       const compId = typeof item.companyId === 'object' ? item.companyId._id : item.companyId;
@@ -242,6 +253,15 @@ export default function ServicesAdminPage() {
       setDeliverablesInput('');
     }
     setIsModalOpen(true);
+  };
+
+  const handleViewService = async (item: ServiceItem) => {
+    try {
+      const res = await adminFetch(`/services/${item._id || item.slug}`);
+      if (res.success && res.data) setViewingService(res.data);
+    } catch (err: any) {
+      alert(err.message || 'Could not load the full service');
+    }
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -440,7 +460,9 @@ export default function ServicesAdminPage() {
         /* GRID VIEW */
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredServices.map((service) => {
-            const imgUrl = service.image?.url || service.imageUrl;
+            const imgUrl = service.cardImagePath
+              ? `${API_BASE}${service.cardImagePath.replace(/^\/api/, '')}`
+              : service.image?.url || service.imageUrl;
             const currentStatus = service.status || (service.isVisible ? 'Publish' : 'Hide');
 
             return (
@@ -538,7 +560,7 @@ export default function ServicesAdminPage() {
                 <div className="p-6 pt-0 flex items-center justify-between border-t border-slate-100 mt-4">
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => setViewingService(service)}
+                      onClick={() => handleViewService(service)}
                       className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs transition-colors cursor-pointer"
                       title="Quick Preview Modal"
                     >
@@ -649,7 +671,7 @@ export default function ServicesAdminPage() {
                       </td>
                       <td className="p-4 text-right space-x-2">
                         <button
-                          onClick={() => setViewingService(service)}
+                          onClick={() => handleViewService(service)}
                           className="p-2 rounded-xl bg-slate-100 text-slate-700 hover:text-cyan-700 hover:bg-slate-200 border border-slate-200 transition-colors"
                           title="Quick View"
                         >
