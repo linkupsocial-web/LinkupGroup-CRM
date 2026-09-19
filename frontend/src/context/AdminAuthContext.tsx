@@ -35,6 +35,7 @@ interface AdminAuthContextType {
 }
 
 const AdminAuthContext = createContext<AdminAuthContextType | undefined>(undefined);
+const ACTIVE_COMPANY_STORAGE_KEY = 'linkup-admin-active-company-id';
 
 export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<AdminUser | null>(null);
@@ -44,6 +45,18 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
+
+  const selectCompany = (company: Company | null) => {
+    setSelectedCompany(company);
+
+    if (typeof window === 'undefined') return;
+
+    if (company) {
+      window.localStorage.setItem(ACTIVE_COMPANY_STORAGE_KEY, company._id);
+    } else {
+      window.localStorage.removeItem(ACTIVE_COMPANY_STORAGE_KEY);
+    }
+  };
 
   useEffect(() => {
     const initAuth = async () => {
@@ -97,9 +110,22 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       const res = await adminFetch('/companies');
       if (res.success && Array.isArray(res.data) && res.data.length > 0) {
         setCompanies(res.data);
-        if (!selectedCompany || selectedCompany._id === 'all') {
-          setSelectedCompany(res.data[0]); // Default to first company (e.g. Linkup Social)
-        }
+        const savedCompanyId = typeof window === 'undefined'
+          ? null
+          : window.localStorage.getItem(ACTIVE_COMPANY_STORAGE_KEY);
+
+        setSelectedCompany((currentCompany) => {
+          const nextCompany =
+            res.data.find((company: Company) => company._id === savedCompanyId) ||
+            res.data.find((company: Company) => company._id === currentCompany?._id) ||
+            res.data[0];
+
+          if (typeof window !== 'undefined') {
+            window.localStorage.setItem(ACTIVE_COMPANY_STORAGE_KEY, nextCompany._id);
+          }
+
+          return nextCompany;
+        });
       }
     } catch {
       // Companies need a valid session — keep empty when unauthenticated / API unreachable
@@ -121,7 +147,7 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setToken(null);
     setUser(null);
     setCompanies([]);
-    setSelectedCompany(null);
+    selectCompany(null);
     router.replace('/admin/login');
   };
 
@@ -132,7 +158,7 @@ export const AdminAuthProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         token,
         companies,
         selectedCompany,
-        setSelectedCompany,
+        setSelectedCompany: selectCompany,
         loading,
         isAuthenticated: !!user && !!token,
         login,

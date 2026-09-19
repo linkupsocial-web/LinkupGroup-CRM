@@ -83,7 +83,7 @@ router.post('/', protect, async (req, res) => {
 // @route PUT /api/case-studies/:id
 router.put('/:id', protect, async (req, res) => {
   try {
-    const caseStudy = await CaseStudy.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const caseStudy = await CaseStudy.findByIdAndUpdate(req.params.id, req.body, { returnDocument: 'after', runValidators: true });
     if (!caseStudy) return res.status(404).json({ success: false, message: 'Case Study not found' });
     res.json({ success: true, data: caseStudy });
   } catch (err) {
@@ -98,7 +98,7 @@ router.patch('/:id/status', protect, async (req, res) => {
     if (!['Draft', 'Publish', 'Hide'].includes(status)) {
       return res.status(400).json({ success: false, message: 'Invalid status' });
     }
-    const caseStudy = await CaseStudy.findByIdAndUpdate(req.params.id, { status }, { new: true });
+    const caseStudy = await CaseStudy.findByIdAndUpdate(req.params.id, { status }, { returnDocument: 'after' });
     if (!caseStudy) return res.status(404).json({ success: false, message: 'Case Study not found' });
     res.json({ success: true, data: caseStudy });
   } catch (err) {
@@ -109,7 +109,7 @@ router.patch('/:id/status', protect, async (req, res) => {
 // @route DELETE /api/case-studies/:id
 router.delete('/:id', protect, async (req, res) => {
   try {
-    const caseStudy = await CaseStudy.findByIdAndUpdate(req.params.id, { isDeleted: true }, { new: true });
+    const caseStudy = await CaseStudy.findByIdAndUpdate(req.params.id, { isDeleted: true }, { returnDocument: 'after' });
     if (!caseStudy) return res.status(404).json({ success: false, message: 'Case Study not found' });
     res.json({ success: true, message: 'Case Study soft-deleted', data: caseStudy });
   } catch (err) {

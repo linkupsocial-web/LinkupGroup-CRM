@@ -29,7 +29,7 @@ router.post('/', protect, async (req, res) => {
     const seo = await SEO.findOneAndUpdate(
       { companyId, pageSlug },
       { companyId, pageSlug, ...seoData },
-      { new: true, upsert: true, runValidators: true }
+      { returnDocument: 'after', upsert: true, runValidators: true }
     );
     res.json({ success: true, data: seo });
   } catch (err) {

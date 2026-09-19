@@ -48,11 +48,10 @@ interface BlogItem {
 }
 
 export default function BlogsAdminPage() {
-  const { selectedCompany, companies } = useAdminAuth();
+  const { selectedCompany, companies, setSelectedCompany } = useAdminAuth();
   const [blogs, setBlogs] = useState<BlogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [companyFilter, setCompanyFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [viewingBlog, setViewingBlog] = useState<BlogItem | null>(null);
@@ -61,6 +60,7 @@ export default function BlogsAdminPage() {
 
   const [tagsInput, setTagsInput] = useState('');
   const [highlightsInput, setHighlightsInput] = useState('');
+  const companyFilter = selectedCompany?._id || '';
 
   const [formData, setFormData] = useState<BlogItem>({
     companyId: '',
@@ -81,10 +81,15 @@ export default function BlogsAdminPage() {
   });
 
   const fetchBlogs = async () => {
+    if (!companyFilter) {
+      setBlogs([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     try {
-      const activeFilter = companyFilter || 'all';
-      const res = await adminFetch(`/blogs?companyId=${activeFilter}&includeAll=true`);
+      const res = await adminFetch(`/blogs?companyId=${companyFilter}&includeAll=true`);
       if (res.success && Array.isArray(res.data)) {
         setBlogs(res.data);
       }
@@ -267,6 +272,10 @@ export default function BlogsAdminPage() {
       const slugVal = formData.slug || formData.id || formData.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
       const excerptVal = formData.excerpt || formData.shortDescription || '';
       const dateVal = formData.publishDate || formData.date || new Date().toISOString().split('T')[0];
+      const formCompanyId = typeof formData.companyId === 'object' ? formData.companyId._id : formData.companyId;
+      const editingCompanyId = editingItem
+        ? (typeof editingItem.companyId === 'object' ? editingItem.companyId._id : editingItem.companyId)
+        : '';
 
       const contentVal = typeof formData.content === 'string'
         ? formData.content.split(/\n\n+/).map(p => p.trim()).filter(Boolean)
@@ -274,7 +283,8 @@ export default function BlogsAdminPage() {
 
       const payload = {
         ...formData,
-        companyId: selectedCompany?._id || formData.companyId,
+        // Editing a record must never move it to the globally selected company.
+        companyId: editingCompanyId || formCompanyId || selectedCompany?._id || '',
         id: slugVal,
         slug: slugVal,
         excerpt: excerptVal,
@@ -343,12 +353,8 @@ export default function BlogsAdminPage() {
     const tagsMatch = (b.tags || []).some(t => t.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesSearch = titleMatch || categoryMatch || tagsMatch;
 
-    if (companyFilter === 'all') {
-      return matchesSearch;
-    } else {
-      const bCompId = typeof b.companyId === 'object' ? (b.companyId as any)?._id : b.companyId;
-      return matchesSearch && (bCompId === companyFilter || !bCompId);
-    }
+    const bCompId = typeof b.companyId === 'object' ? (b.companyId as any)?._id : b.companyId;
+    return matchesSearch && bCompId === companyFilter;
   });
 
   return (
@@ -386,10 +392,12 @@ export default function BlogsAdminPage() {
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
           <select
             value={companyFilter}
-            onChange={(e) => setCompanyFilter(e.target.value)}
+            onChange={(e) => {
+              const company = companies.find((item) => item._id === e.target.value);
+              if (company) setSelectedCompany(company);
+            }}
             className="bg-slate-50 border-2 border-slate-300 hover:border-cyan-600 text-cyan-800 font-extrabold text-xs sm:text-base rounded-xl px-3 sm:px-4 py-2.5 sm:py-3 focus:outline-none focus:border-cyan-600 cursor-pointer w-full sm:w-auto min-w-0 truncate max-w-full"
           >
-            <option value="all" className="bg-white text-cyan-700 font-bold">🌐 All Companies</option>
             {companies.map((c) => (
               <option key={c._id} value={c._id} className="bg-white text-slate-900 font-bold">
                 {c.name}

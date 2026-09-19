@@ -23,7 +23,7 @@ router.put('/', protect, superAdminOnly, async (req, res) => {
     if (!setting) {
       setting = await Setting.create(req.body);
     } else {
-      setting = await Setting.findByIdAndUpdate(setting._id, req.body, { new: true });
+      setting = await Setting.findByIdAndUpdate(setting._id, req.body, { returnDocument: 'after' });
     }
     res.json({ success: true, data: setting });
   } catch (err) {

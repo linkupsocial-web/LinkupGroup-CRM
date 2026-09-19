@@ -73,7 +73,7 @@ router.post('/', protect, async (req, res) => {
 // @route PUT /api/projects/:id
 router.put('/:id', protect, async (req, res) => {
   try {
-    const project = await Project.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const project = await Project.findByIdAndUpdate(req.params.id, req.body, { returnDocument: 'after', runValidators: true });
     if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
     res.json({ success: true, data: project });
   } catch (err) {
@@ -85,7 +85,7 @@ router.put('/:id', protect, async (req, res) => {
 router.patch('/:id/visibility', protect, async (req, res) => {
   try {
     const { isVisible } = req.body;
-    const project = await Project.findByIdAndUpdate(req.params.id, { isVisible }, { new: true });
+    const project = await Project.findByIdAndUpdate(req.params.id, { isVisible }, { returnDocument: 'after' });
     if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
     res.json({ success: true, data: project });
   } catch (err) {
@@ -96,7 +96,7 @@ router.patch('/:id/visibility', protect, async (req, res) => {
 // @route DELETE /api/projects/:id (Soft delete)
 router.delete('/:id', protect, async (req, res) => {
   try {
-    const project = await Project.findByIdAndUpdate(req.params.id, { isDeleted: true }, { new: true });
+    const project = await Project.findByIdAndUpdate(req.params.id, { isDeleted: true }, { returnDocument: 'after' });
     if (!project) return res.status(404).json({ success: false, message: 'Project not found' });
     res.json({ success: true, message: 'Project soft-deleted', data: project });
   } catch (err) {

@@ -271,6 +271,10 @@ export default function CaseStudiesAdminPage() {
       const slugVal = formData.slug || formData.id || formData.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
       const excerptVal = formData.excerpt || formData.shortDescription || '';
       const dateVal = formData.publishDate || formData.date || new Date().toISOString().split('T')[0];
+      const formCompanyId = typeof formData.companyId === 'object' ? formData.companyId._id : formData.companyId;
+      const editingCompanyId = editingItem
+        ? (typeof editingItem.companyId === 'object' ? editingItem.companyId._id : editingItem.companyId)
+        : '';
 
       const contentVal = typeof formData.content === 'string'
         ? formData.content.split(/\n\n+/).map(p => p.trim()).filter(Boolean)
@@ -278,7 +282,8 @@ export default function CaseStudiesAdminPage() {
 
       const payload = {
         ...formData,
-        companyId: selectedCompany?._id || formData.companyId,
+        // Editing a record must never move it to the globally selected company.
+        companyId: editingCompanyId || formCompanyId || selectedCompany?._id || '',
         id: slugVal,
         slug: slugVal,
         excerpt: excerptVal,

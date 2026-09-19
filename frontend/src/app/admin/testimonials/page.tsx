@@ -113,7 +113,11 @@ export default function TestimonialsAdminPage() {
     e.preventDefault();
     setSaving(true);
     try {
-      const payload = { ...formData, companyId: selectedCompany?._id || formData.companyId };
+      const payload = {
+        ...formData,
+        // Keep an existing testimonial in its company; selectedCompany is only the default for a new testimonial.
+        companyId: editingItem?.companyId || formData.companyId || selectedCompany?._id || ''
+      };
       if (editingItem?._id) {
         await adminFetch(`/testimonials/${editingItem._id}`, { method: 'PUT', body: JSON.stringify(payload) });
       } else {
