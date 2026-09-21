@@ -13,9 +13,13 @@ connectDB();
 
 // Middleware
 const allowedOrigins = [
-  'http://localhost:4029',
+  'http://localhost:3000',
+  'http://localhost:3001',
   'http://localhost:4028',
+  'http://localhost:4029',
+  'http://localhost:5173',
   'https://linkup-group-crm.vercel.app',
+  'https://linkup-admin-frontend.vercel.app',
 ];
 
 app.use(cors({
@@ -23,11 +27,15 @@ app.use(cors({
     // Postman, server-to-server requests etc.
     if (!origin) return callback(null, true);
 
-    if (allowedOrigins.includes(origin)) {
+    if (
+      allowedOrigins.includes(origin) ||
+      /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
+      origin.endsWith('.vercel.app')
+    ) {
       return callback(null, true);
     }
 
-    return callback(new Error('Not allowed by CORS'));
+    return callback(new Error(`Not allowed by CORS: ${origin}`));
   },
   credentials: true,
 }));

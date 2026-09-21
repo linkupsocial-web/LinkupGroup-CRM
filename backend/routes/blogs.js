@@ -4,14 +4,19 @@ const mongoose = require('mongoose');
 const Blog = require('../models/Blog');
 const { protect } = require('../middleware/auth');
 const { articleCard, mediaOrigin, isEmbeddedDataUrl } = require('../utils/listPayload');
+const { resolveCompanyId } = require('../utils/companyHelper');
 
 // @route GET /api/blogs
 router.get('/', async (req, res) => {
   try {
-    const { companyId, status, includeAll, summary } = req.query;
+    const { status, includeAll, summary } = req.query;
     const filter = { isDeleted: false };
     
-    if (companyId && companyId !== 'all' && mongoose.Types.ObjectId.isValid(companyId)) {
+    const companyId = await resolveCompanyId(req);
+    if (companyId === 'NOT_FOUND') {
+      return res.json({ success: true, count: 0, data: [] });
+    }
+    if (companyId) {
       filter.companyId = companyId;
     }
     

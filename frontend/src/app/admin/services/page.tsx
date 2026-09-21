@@ -98,6 +98,12 @@ export default function ServicesAdminPage() {
     seo: {}
   });
 
+  useEffect(() => {
+    if (selectedCompany?._id) {
+      setCompanyFilter(selectedCompany._id);
+    }
+  }, [selectedCompany]);
+
   const fetchServices = async () => {
     setLoading(true);
     try {

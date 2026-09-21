@@ -83,6 +83,12 @@ export default function CaseStudiesAdminPage() {
     seo: {}
   });
 
+  useEffect(() => {
+    if (selectedCompany?._id) {
+      setCompanyFilter(selectedCompany._id);
+    }
+  }, [selectedCompany]);
+
   const fetchCaseStudies = async () => {
     setLoading(true);
     try {
@@ -237,8 +243,9 @@ export default function CaseStudiesAdminPage() {
       setHighlightsInput((item.highlights || []).join('\n'));
     } else {
       setEditingItem(null);
+      const defaultCompId = (companyFilter !== 'all' ? companyFilter : '') || selectedCompany?._id || companies[0]?._id || '';
       setFormData({
-        companyId: selectedCompany?._id || '',
+        companyId: defaultCompId,
         title: '',
         slug: '',
         category: 'Case Study',
@@ -833,6 +840,23 @@ export default function CaseStudiesAdminPage() {
             </div>
 
             <form onSubmit={handleSave} className="p-6 space-y-6 overflow-y-auto flex-1 text-base">
+              {/* Company Selector */}
+              <div>
+                <label className="block text-base font-bold text-slate-800 mb-2">Assigned Company *</label>
+                <select
+                  required
+                  value={typeof formData.companyId === 'string' ? formData.companyId : (formData.companyId as any)?._id}
+                  onChange={(e) => setFormData({ ...formData, companyId: e.target.value })}
+                  className="w-full bg-slate-50 border-2 border-slate-300 rounded-xl px-4 py-3.5 text-base font-bold text-slate-900 focus:outline-none focus:border-cyan-600 cursor-pointer"
+                >
+                  {companies.map((c) => (
+                    <option key={c._id} value={c._id}>
+                      {c.name} ({c.code})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <div>
                   <label className="block text-base font-bold text-slate-800 mb-2">Case Study Title *</label>

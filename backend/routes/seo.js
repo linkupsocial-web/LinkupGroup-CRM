@@ -2,13 +2,21 @@ const express = require('express');
 const router = express.Router();
 const SEO = require('../models/SEO');
 const { protect } = require('../middleware/auth');
+const { resolveCompanyId } = require('../utils/companyHelper');
 
 // @route GET /api/seo?companyId=...&pageSlug=...
 router.get('/', async (req, res) => {
   try {
-    const { companyId, pageSlug } = req.query;
+    const { pageSlug } = req.query;
     const filter = {};
-    if (companyId) filter.companyId = companyId;
+    
+    const companyId = await resolveCompanyId(req);
+    if (companyId === 'NOT_FOUND') {
+      return res.json({ success: true, count: 0, data: [] });
+    }
+    if (companyId) {
+      filter.companyId = companyId;
+    }
     if (pageSlug) filter.pageSlug = pageSlug;
 
     const seoRecords = await SEO.find(filter).populate('companyId', 'name code');
@@ -21,7 +29,13 @@ router.get('/', async (req, res) => {
 // @route POST /api/seo (Upsert per companyId + pageSlug)
 router.post('/', protect, async (req, res) => {
   try {
-    const { companyId, pageSlug, ...seoData } = req.body;
+    let { companyId, pageSlug, ...seoData } = req.body;
+    if (companyId) {
+      const resolved = await resolveCompanyId(companyId);
+      if (resolved && resolved !== 'NOT_FOUND') {
+        companyId = resolved;
+      }
+    }
     if (!companyId || !pageSlug) {
       return res.status(400).json({ success: false, message: 'companyId and pageSlug are required' });
     }

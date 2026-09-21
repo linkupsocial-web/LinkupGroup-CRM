@@ -3,14 +3,19 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const FAQ = require('../models/FAQ');
 const { protect } = require('../middleware/auth');
+const { resolveCompanyId } = require('../utils/companyHelper');
 
 // @route GET /api/faqs
 router.get('/', async (req, res) => {
   try {
-    const { companyId, includeHidden, pageSlug, includePageFaqs, summary } = req.query;
+    const { includeHidden, pageSlug, includePageFaqs, summary } = req.query;
     const filter = { isDeleted: false };
     
-    if (companyId && companyId !== 'all' && mongoose.Types.ObjectId.isValid(companyId)) {
+    const companyId = await resolveCompanyId(req);
+    if (companyId === 'NOT_FOUND') {
+      return res.json({ success: true, count: 0, data: [] });
+    }
+    if (companyId) {
       filter.companyId = companyId;
     }
 
@@ -34,7 +39,9 @@ router.get('/', async (req, res) => {
       return res.json({ success: true, count, data: [] });
     }
 
-    const faqs = await FAQ.find(filter).sort({ displayOrder: 1, createdAt: -1 });
+    const faqs = await FAQ.find(filter)
+      .populate('companyId', 'name code slug')
+      .sort({ displayOrder: 1, createdAt: -1 });
     res.json({ success: true, count: faqs.length, data: faqs });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

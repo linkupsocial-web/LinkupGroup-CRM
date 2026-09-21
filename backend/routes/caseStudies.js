@@ -4,14 +4,19 @@ const mongoose = require('mongoose');
 const CaseStudy = require('../models/CaseStudy');
 const { protect } = require('../middleware/auth');
 const { articleCard, mediaOrigin, isEmbeddedDataUrl } = require('../utils/listPayload');
+const { resolveCompanyId } = require('../utils/companyHelper');
 
 // @route GET /api/case-studies
 router.get('/', async (req, res) => {
   try {
-    const { companyId, status, includeAll, summary } = req.query;
+    const { status, includeAll, summary } = req.query;
     const filter = { isDeleted: false };
     
-    if (companyId && companyId !== 'all' && mongoose.Types.ObjectId.isValid(companyId)) {
+    const companyId = await resolveCompanyId(req);
+    if (companyId === 'NOT_FOUND') {
+      return res.json({ success: true, count: 0, data: [] });
+    }
+    if (companyId) {
       filter.companyId = companyId;
     }
     
@@ -51,15 +56,24 @@ router.get('/:id/image', async (req, res) => {
 // @route GET /api/case-studies/:id
 router.get('/:id', async (req, res) => {
   try {
+    const companyId = await resolveCompanyId(req);
     let caseStudy = null;
-    if (mongoose.Types.ObjectId.isValid(req.params.id)) {
-      caseStudy = await CaseStudy.findById(req.params.id).populate('companyId', 'name code slug');
+    if (mongoose.Types.ObjectId.isValid(req.params.id) && /^[0-9a-fA-F]{24}$/.test(req.params.id)) {
+      const query = { _id: req.params.id, isDeleted: false };
+      if (companyId && companyId !== 'NOT_FOUND') {
+        query.companyId = companyId;
+      }
+      caseStudy = await CaseStudy.findOne(query).populate('companyId', 'name code slug');
     }
     if (!caseStudy) {
-      caseStudy = await CaseStudy.findOne({
+      const query = {
         $or: [{ slug: req.params.id }, { id: req.params.id }],
         isDeleted: false
-      }).populate('companyId', 'name code slug');
+      };
+      if (companyId && companyId !== 'NOT_FOUND') {
+        query.companyId = companyId;
+      }
+      caseStudy = await CaseStudy.findOne(query).populate('companyId', 'name code slug');
     }
     if (!caseStudy) {
       return res.status(404).json({ success: false, message: 'Case Study not found' });
@@ -73,7 +87,14 @@ router.get('/:id', async (req, res) => {
 // @route POST /api/case-studies
 router.post('/', protect, async (req, res) => {
   try {
-    const caseStudy = await CaseStudy.create(req.body);
+    const data = { ...req.body };
+    if (data.companyId) {
+      const resolved = await resolveCompanyId(data.companyId);
+      if (resolved && resolved !== 'NOT_FOUND') {
+        data.companyId = resolved;
+      }
+    }
+    const caseStudy = await CaseStudy.create(data);
     res.status(201).json({ success: true, data: caseStudy });
   } catch (err) {
     res.status(400).json({ success: false, message: err.message });

@@ -4,14 +4,19 @@ const mongoose = require('mongoose');
 const Service = require('../models/Service');
 const { protect } = require('../middleware/auth');
 const { serviceCard, mediaOrigin, isEmbeddedDataUrl } = require('../utils/listPayload');
+const { resolveCompanyId } = require('../utils/companyHelper');
 
 // @route GET /api/services?companyId=...
 router.get('/', async (req, res) => {
   try {
-    const { companyId, includeHidden, parentServiceId, includeLocationServices, summary } = req.query;
+    const { includeHidden, parentServiceId, includeLocationServices, summary } = req.query;
     const filter = { isDeleted: false };
     
-    if (companyId && companyId !== 'all' && mongoose.Types.ObjectId.isValid(companyId)) {
+    const companyId = await resolveCompanyId(req);
+    if (companyId === 'NOT_FOUND') {
+      return res.json({ success: true, count: 0, data: [] });
+    }
+    if (companyId) {
       filter.companyId = companyId;
     }
     
@@ -47,12 +52,22 @@ router.get('/', async (req, res) => {
 router.get('/:id/locations', async (req, res) => {
   try {
     const { id } = req.params;
+    const companyId = await resolveCompanyId(req);
+
     let parentService;
-    if (mongoose.Types.ObjectId.isValid(id)) {
-      parentService = await Service.findById(id);
+    if (mongoose.Types.ObjectId.isValid(id) && /^[0-9a-fA-F]{24}$/.test(id)) {
+      const parentQuery = { _id: id, isDeleted: false };
+      if (companyId && companyId !== 'NOT_FOUND') {
+        parentQuery.companyId = companyId;
+      }
+      parentService = await Service.findOne(parentQuery);
     }
     if (!parentService) {
-      parentService = await Service.findOne({ slug: id, isDeleted: false });
+      const parentQuery = { slug: id, isDeleted: false };
+      if (companyId && companyId !== 'NOT_FOUND') {
+        parentQuery.companyId = companyId;
+      }
+      parentService = await Service.findOne(parentQuery);
     }
     if (!parentService) {
       return res.status(404).json({ success: false, message: 'Parent service not found' });
@@ -89,14 +104,24 @@ router.get('/:id/image', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    const companyId = await resolveCompanyId(req);
+
     let service;
-    if (mongoose.Types.ObjectId.isValid(id)) {
-      service = await Service.findById(id)
+    if (mongoose.Types.ObjectId.isValid(id) && /^[0-9a-fA-F]{24}$/.test(id)) {
+      const query = { _id: id, isDeleted: false };
+      if (companyId && companyId !== 'NOT_FOUND') {
+        query.companyId = companyId;
+      }
+      service = await Service.findOne(query)
         .populate('companyId', 'name code slug')
         .populate('parentServiceId', 'serviceName title slug location');
     }
     if (!service) {
-      service = await Service.findOne({ slug: id, isDeleted: false })
+      const query = { slug: id, isDeleted: false };
+      if (companyId && companyId !== 'NOT_FOUND') {
+        query.companyId = companyId;
+      }
+      service = await Service.findOne(query)
         .populate('companyId', 'name code slug')
         .populate('parentServiceId', 'serviceName title slug location');
     }
@@ -112,7 +137,14 @@ router.get('/:id', async (req, res) => {
 // @route POST /api/services
 router.post('/', protect, async (req, res) => {
   try {
-    const service = await Service.create(req.body);
+    const data = { ...req.body };
+    if (data.companyId) {
+      const resolved = await resolveCompanyId(data.companyId);
+      if (resolved && resolved !== 'NOT_FOUND') {
+        data.companyId = resolved;
+      }
+    }
+    const service = await Service.create(data);
     res.status(201).json({ success: true, data: service });
   } catch (err) {
     res.status(400).json({ success: false, message: err.message });
