@@ -1,100 +1,73 @@
 # Remote MongoDB to local Docker migration
 
-This workflow makes a read-only dump of the remote application database, verifies the archive, deletes only the confirmed local Compose Mongo volume, recreates the local Mongo accounts, restores the application data, and compares collection counts.
+This checkpoint is deliberately backup-only. It reads the remote `test` database, creates and verifies a timestamped directory-format backup, and then stops. It cannot delete the local Mongo volume or restore data.
 
-> **Critical safety rule:** the script must never modify the remote database. It uses only `ping`, collection enumeration, document counts, and `mongodump` against the source. `mongorestore` is connected only to the local `mongo` service.
+> **Critical safety rule:** do not remove `linkup-crm_mongo_data` until this backup passes every verification and the operator separately types the exact confirmation phrase requested in the backup report.
 
 ## 1. Configure the remote source
 
-Create the ignored local migration environment from the template:
-
-```bash
-cp .env.migration.example .env.migration
-chmod 600 .env.migration
-```
-
-Set the remote URI only in `.env.migration`:
+Keep the remote URI only in the ignored, mode-`600` `.env.migration` file:
 
 ```dotenv
 SOURCE_MONGODB_URI=mongodb+srv://REDACTED
-SOURCE_MONGO_DB=linkup_cms
+SOURCE_MONGO_DB=test
 TARGET_MONGO_DB=linkup_cms
 ```
 
-Use a URI-encoded password when it contains reserved URI characters. Prefer a remote Mongo account that has read-only access to `SOURCE_MONGO_DB`. Never commit or print this file.
+Use a URI-encoded password and a remote account with read-only access to `test`. Never commit or print this file. The script writes the URI to temporary mode-`600` mounted files so it is not passed in a Docker command argument or container environment variable.
 
-## 2. Create and verify a backup without deleting local data
-
-```bash
-bash scripts/migrate-remote-mongo-to-local.sh --backup-only
-```
-
-Archives are written as:
-
-```text
-.mongo-backups/remote-linkup_cms-YYYYMMDD-HHMMSS.archive.gz
-```
-
-The script requires a successful remote ping, records collection counts, runs `mongodump` only for `SOURCE_MONGO_DB`, verifies a non-empty archive and SHA-256 checksum, and performs a `mongorestore --dryRun` against local Mongo. Failure at any verification step prevents deletion.
-
-The archive, checksum, and count manifests remain in the Git-ignored `.mongo-backups/` directory.
-
-## 3. Run the complete migration
+## 2. Create and verify the backup
 
 ```bash
 bash scripts/migrate-remote-mongo-to-local.sh
 ```
 
-After the verified backup is complete, the script displays the exact labeled local volume. It continues only when an operator types exactly:
+Backups use native MongoDB directory format with gzip:
+
+```text
+.mongo-backups/remote-test-YYYYMMDD-HHMMSS/
+  REMOTE_COUNTS.tsv
+  SHA256SUMS
+  test/
+    admins.bson.gz
+    admins.metadata.json.gz
+    ...
+```
+
+The script performs only these operations:
+
+1. Discovers non-system collections and records their remote document counts.
+2. Runs `mongodump --db=test --out=/backup --gzip --numParallelCollections=1`.
+3. Prints safe size progress every 30 seconds and declares a stall only after five continuous minutes without output growth.
+4. If the full dump stalls or fails, preserves collections that `mongodump` reported complete and retries only incomplete collections.
+5. Requires a non-empty BSON and metadata gzip for every discovered collection and checks gzip integrity.
+6. Runs `mongorestore --dryRun --dir=/backup/test` against local configuration and requires every collection to appear in the dry-run namespace listing; this reads the dump but writes no local data.
+7. Generates and verifies `SHA256SUMS` for every backup file.
+8. Prints the backup report and stops.
+
+If a dump completed but a later verification assertion needs to be rerun, reuse it without contacting the remote source or redumping data:
+
+```bash
+bash scripts/migrate-remote-mongo-to-local.sh --verify-existing .mongo-backups/remote-test-YYYYMMDD-HHMMSS
+```
+
+Only the remote application database `test` is dumped. The `admin`, `local`, `config`, and unrelated `sample_mflix` databases are excluded. The `test.admins` collection is application data and is included; MongoDB authentication users are not.
+
+## 3. Destructive gate
+
+After a verified report, the next phase requires the operator to type exactly:
 
 ```text
 DELETE LOCAL MONGO
 ```
 
-This permanently destroys only the local `linkup-crm` Mongo data. It does not use `docker compose down -v`; it stops this Compose project and removes only the volume labeled as project `linkup-crm` and Compose volume `mongo_data`.
+That confirmation is intentionally not accepted or acted upon by the backup script. Local deletion and restore require a separate, reviewed step after confirmation. Until then:
 
-## 4. Fresh local users and restore
+- do not run `docker compose down -v`;
+- do not remove `linkup-crm_mongo_data`;
+- do not restore into `linkup_cms`;
+- do not run the seed command.
 
-Starting the fresh `mongo` service reruns [docker/mongo/init-app-user.sh](docker/mongo/init-app-user.sh). Mongo recreates its local root account and the dedicated `readWrite` application account from `.env.docker`.
+## 4. Credential hygiene
 
-The restore then connects to `mongo:27017` using the local application account. It restores collections, documents, and indexes from the application database archive. It does not restore `admin`, `local`, or `config`, and does not import remote authentication users.
-
-If source and target database names differ, the script uses `--nsFrom` and `--nsTo`. `TARGET_MONGO_DB` must match the local `MONGO_DB` setting.
-
-The seed command is deliberately never run during this workflow.
-
-## 5. Count and application validation
-
-The script records sorted per-collection remote counts before the dump and local counts after restore. Any difference fails the migration before the application is started.
-
-After a matching restore it starts all services, waits for their Docker health checks, requests `/api/health` and `/api/companies`, and runs:
-
-```bash
-bash scripts/docker-smoke-test.sh
-```
-
-Finally, sign in at <http://localhost:8080/admin> with the existing `.env.docker` CMS credentials and verify the active-company selector reflects the restored companies. CMS authentication remains environment/JWT based; Mongo users are not CMS login users.
-
-## 6. Optional temporary MongoDB Compass access
-
-Mongo stays private by default. For temporary GUI access, create an untracked Compose override containing:
-
-```yaml
-services:
-  mongo:
-    ports:
-      - "127.0.0.1:27017:27017"
-```
-
-Apply it together with `compose.yaml`, connect Compass through `127.0.0.1`, and remove the override/recreate the service when finished. Never bind Mongo to `0.0.0.0`.
-
-## 7. Repeating safely
-
-1. Confirm `.env.migration` points to the intended read-only source.
-2. Run `--backup-only` and retain the verified archive.
-3. Review remote counts and the exact local volume name.
-4. Run the full script and type the exact destructive confirmation only after reviewing the backup evidence.
-5. Review count comparison, smoke-test output, and the CMS company selector.
-6. Keep the archive until rollback and debugging are no longer required.
-
-Never run `npm run seed` after restoring real server data unless that separate action is explicitly authorized.
+If a remote credential has appeared in any prior terminal or diagnostic output, rotate it after securing the verified backup. The backup script avoids process-argument and container-environment exposure, but rotation is still required for a credential that was already disclosed.

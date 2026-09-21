@@ -7,23 +7,35 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 readonly DOCKER_ENV_FILE="${ROOT_DIR}/.env.docker"
 readonly MIGRATION_ENV_FILE="${ROOT_DIR}/.env.migration"
-readonly BACKUP_DIR="${ROOT_DIR}/.mongo-backups"
+readonly BACKUP_ROOT="${ROOT_DIR}/.mongo-backups"
 readonly COMPOSE_FILE="${ROOT_DIR}/compose.yaml"
-readonly BACKUP_ONLY="${1:-}"
-readonly -a COMPOSE=(docker compose --project-directory "${ROOT_DIR}" --env-file "${DOCKER_ENV_FILE}" -f "${COMPOSE_FILE}")
+readonly COUNT_SCRIPT="${SCRIPT_DIR}/mongo-remote-counts.js"
+readonly STALL_SECONDS=300
+readonly POLL_SECONDS=30
+readonly MODE="${1:-backup}"
+readonly EXISTING_BACKUP_ARG="${2:-}"
+
+ACTIVE_CONTAINER=''
+SECRET_DIR=''
+LAST_DUMP_LOG=''
 
 die() {
   printf 'ERROR: %s\n' "$1" >&2
   exit 1
 }
 
+cleanup() {
+  if [[ -n "${ACTIVE_CONTAINER}" ]]; then
+    docker stop --time 10 "${ACTIVE_CONTAINER}" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${SECRET_DIR}" && -d "${SECRET_DIR}" ]]; then
+    rm -rf "${SECRET_DIR}"
+  fi
+}
+trap cleanup EXIT INT TERM HUP
+
 require_file() {
   [[ -f "$1" ]] || die "Required file not found: $1"
-}
-
-require_var() {
-  local name="$1"
-  [[ -n "${!name:-}" ]] || die "${name} is required"
 }
 
 load_env_var() {
@@ -43,7 +55,6 @@ load_env_var() {
   done <"${file}"
 
   [[ "${found}" == 'true' ]] || die "${name} is missing from ${file}"
-
   value="${value#"${value%%[![:space:]]*}"}"
   value="${value%"${value##*[![:space:]]}"}"
   value_length="${#value}"
@@ -56,122 +67,111 @@ load_env_var() {
   fi
 
   printf -v "${name}" '%s' "${value}"
-  export "${name}"
 }
 
-wait_for_health() {
-  local service="$1"
-  local timeout_seconds="${2:-180}"
-  local deadline=$((SECONDS + timeout_seconds))
-  local container_id=''
-  local health=''
-
-  while (( SECONDS < deadline )); do
-    container_id="$("${COMPOSE[@]}" ps --quiet "${service}" 2>/dev/null || true)"
-    if [[ -n "${container_id}" ]]; then
-      health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${container_id}" 2>/dev/null || true)"
-      if [[ "${health}" == 'healthy' ]]; then
-        printf '%s is healthy.\n' "${service}"
-        return 0
-      fi
-      if [[ "${health}" == 'unhealthy' || "${health}" == 'exited' || "${health}" == 'dead' ]]; then
-        die "${service} entered state: ${health}"
-      fi
-    fi
-    sleep 2
-  done
-
-  die "Timed out waiting for ${service} to become healthy"
+directory_size_bytes() {
+  local directory="$1"
+  local kilobytes
+  kilobytes="$(du -sk "${directory}" | awk '{print $1}')"
+  printf '%s' "$((kilobytes * 1024))"
 }
 
-resolve_local_volume() {
-  local volume_names
-  local volume_count
-  local labels
-
-  volume_names="$(docker volume ls \
-    --filter "label=com.docker.compose.project=${COMPOSE_PROJECT}" \
-    --filter 'label=com.docker.compose.volume=mongo_data' \
-    --format '{{.Name}}')"
-  volume_count="$(printf '%s\n' "${volume_names}" | sed '/^$/d' | wc -l | tr -d ' ')"
-  [[ "${volume_count}" == '1' ]] || die "Expected exactly one labeled local mongo_data volume; found ${volume_count}"
-
-  LOCAL_MONGO_VOLUME="$(printf '%s\n' "${volume_names}" | sed -n '1p')"
-  labels="$(docker volume inspect --format '{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}' "${LOCAL_MONGO_VOLUME}")"
-  [[ "${labels}" == "${COMPOSE_PROJECT}|mongo_data" ]] || die 'Local Mongo volume labels do not match this Compose project'
-  export LOCAL_MONGO_VOLUME
+format_megabytes() {
+  awk -v bytes="$1" 'BEGIN { printf "%.2f", bytes / 1048576 }'
 }
 
-run_remote_counts() {
-  local destination="$1"
-
-  if ! docker run --rm \
-    --env SOURCE_MONGODB_URI \
-    --env COUNT_DB="${SOURCE_MONGO_DB}" \
-    --env COUNT_JS \
-    --entrypoint sh \
-    "${MONGO_IMAGE}" \
-    -eu -c 'exec mongosh --quiet "$SOURCE_MONGODB_URI" --eval "$COUNT_JS"' \
-    >"${destination}" 2>/dev/null; then
-    rm -f "${destination}"
-    die 'Remote MongoDB ping/count operation failed; verify the read-only URI and source database'
+stop_active_dump() {
+  if [[ -n "${ACTIVE_CONTAINER}" ]]; then
+    docker stop --time 10 "${ACTIVE_CONTAINER}" >/dev/null 2>&1 || true
   fi
 }
 
-run_local_counts() {
-  local destination="$1"
+run_monitored_dump() {
+  local label="$1"
+  shift
+  local container_name="linkup-mongo-backup-$RANDOM-$$"
+  local log_path="${SECRET_DIR}/${container_name}.log"
+  local start_seconds="${SECONDS}"
+  local last_change_seconds="${SECONDS}"
+  local previous_size
+  local current_size
+  local elapsed
+  local client_pid
+  local exit_code
 
+  previous_size="$(directory_size_bytes "${BACKUP_DIR}")"
+  LAST_DUMP_LOG="${log_path}"
+  ACTIVE_CONTAINER="${container_name}"
   docker run --rm \
-    --network "${DB_NETWORK}" \
-    --env MONGO_APP_USERNAME \
-    --env MONGO_APP_PASSWORD \
-    --env COUNT_DB="${TARGET_MONGO_DB}" \
-    --env COUNT_JS \
-    --entrypoint sh \
+    --name "${container_name}" \
+    --mount "type=bind,src=${SOURCE_CONFIG},dst=/run/secrets/source.yml,readonly" \
+    --mount "type=bind,src=${BACKUP_DIR},dst=/backup" \
+    --entrypoint mongodump \
     "${MONGO_IMAGE}" \
-    -eu -c 'exec mongosh --quiet --host mongo --port 27017 --username "$MONGO_APP_USERNAME" --password "$MONGO_APP_PASSWORD" --authenticationDatabase "$COUNT_DB" "$COUNT_DB" --eval "$COUNT_JS"' \
-    >"${destination}"
+    --config=/run/secrets/source.yml \
+    --db="${SOURCE_MONGO_DB}" \
+    --out=/backup \
+    --gzip \
+    --numParallelCollections=1 \
+    "$@" >"${log_path}" 2>&1 &
+  client_pid=$!
+
+  while kill -0 "${client_pid}" 2>/dev/null; do
+    sleep "${POLL_SECONDS}"
+    current_size="$(directory_size_bytes "${BACKUP_DIR}")"
+    elapsed=$((SECONDS - start_seconds))
+    if [[ "${current_size}" != "${previous_size}" ]]; then
+      previous_size="${current_size}"
+      last_change_seconds="${SECONDS}"
+    fi
+    printf '%s RUNNING %s MB elapsed=%ss\n' "${label}" "$(format_megabytes "${current_size}")" "${elapsed}"
+    if ! kill -0 "${client_pid}" 2>/dev/null; then
+      break
+    fi
+    if (( SECONDS - last_change_seconds >= STALL_SECONDS )); then
+      printf '%s STALLED no-output-growth=%ss\n' "${label}" "${STALL_SECONDS}"
+      stop_active_dump
+      wait "${client_pid}" 2>/dev/null || true
+      ACTIVE_CONTAINER=''
+      return 124
+    fi
+  done
+
+  if wait "${client_pid}"; then
+    exit_code=0
+  else
+    exit_code=$?
+  fi
+  ACTIVE_CONTAINER=''
+  current_size="$(directory_size_bytes "${BACKUP_DIR}")"
+  elapsed=$((SECONDS - start_seconds))
+  if (( exit_code == 0 )); then
+    printf '%s PASS %s MB elapsed=%ss\n' "${label}" "$(format_megabytes "${current_size}")" "${elapsed}"
+    return 0
+  fi
+  printf '%s FAIL elapsed=%ss\n' "${label}" "${elapsed}"
+  return "${exit_code}"
 }
 
-run_restore() {
-  local mode="$1"
-
-  docker run --rm \
-    --network "${DB_NETWORK}" \
-    --env MONGO_APP_USERNAME \
-    --env MONGO_APP_PASSWORD \
-    --env SOURCE_MONGO_DB \
-    --env TARGET_MONGO_DB \
-    --env ARCHIVE_BASENAME \
-    --env RESTORE_MODE="${mode}" \
-    --volume "${BACKUP_DIR}:/backup:ro" \
-    --entrypoint sh \
-    "${MONGO_IMAGE}" \
-    -eu -c '
-      set -- mongorestore
-      set -- "$@" --quiet
-      set -- "$@" --host mongo --port 27017
-      set -- "$@" --username "$MONGO_APP_USERNAME" --password "$MONGO_APP_PASSWORD"
-      set -- "$@" --authenticationDatabase "$TARGET_MONGO_DB"
-      set -- "$@" --archive="/backup/$ARCHIVE_BASENAME" --gzip
-      set -- "$@" --nsInclude="$SOURCE_MONGO_DB.*"
-      if [ "$SOURCE_MONGO_DB" != "$TARGET_MONGO_DB" ]; then
-        set -- "$@" --nsFrom="$SOURCE_MONGO_DB.*" --nsTo="$TARGET_MONGO_DB.*"
-      fi
-      if [ "$RESTORE_MODE" = "dry-run" ]; then
-        set -- "$@" --dryRun
-      fi
-      exec "$@"
-    '
+collection_complete_in_full_dump() {
+  local collection="$1"
+  local bson_path="${BACKUP_DIR}/${SOURCE_MONGO_DB}/${collection}.bson.gz"
+  local metadata_path="${BACKUP_DIR}/${SOURCE_MONGO_DB}/${collection}.metadata.json.gz"
+  [[ -s "${bson_path}" && -s "${metadata_path}" ]] || return 1
+  grep -Fq "done dumping ${SOURCE_MONGO_DB}.${collection} (" "${FULL_DUMP_LOG}"
 }
-
-if [[ -n "${BACKUP_ONLY}" && "${BACKUP_ONLY}" != '--backup-only' ]]; then
-  die 'Supported optional argument: --backup-only'
-fi
 
 require_file "${DOCKER_ENV_FILE}"
 require_file "${MIGRATION_ENV_FILE}"
 require_file "${COMPOSE_FILE}"
+require_file "${COUNT_SCRIPT}"
+
+if [[ "${MODE}" != 'backup' && "${MODE}" != '--verify-existing' ]]; then
+  die 'Usage: migrate-remote-mongo-to-local.sh [--verify-existing BACKUP_DIRECTORY]'
+fi
+if [[ "${MODE}" == '--verify-existing' && -z "${EXISTING_BACKUP_ARG}" ]]; then
+  die '--verify-existing requires a backup directory'
+fi
 
 load_env_var "${MIGRATION_ENV_FILE}" SOURCE_MONGODB_URI
 load_env_var "${MIGRATION_ENV_FILE}" SOURCE_MONGO_DB
@@ -180,151 +180,189 @@ load_env_var "${DOCKER_ENV_FILE}" MONGO_APP_USERNAME
 load_env_var "${DOCKER_ENV_FILE}" MONGO_APP_PASSWORD
 load_env_var "${DOCKER_ENV_FILE}" MONGO_DB
 
-require_var SOURCE_MONGODB_URI
-require_var SOURCE_MONGO_DB
-require_var TARGET_MONGO_DB
-require_var MONGO_APP_USERNAME
-require_var MONGO_APP_PASSWORD
-require_var MONGO_DB
-
+[[ -n "${SOURCE_MONGODB_URI}" ]] || die 'SOURCE_MONGODB_URI is required'
 [[ "${SOURCE_MONGODB_URI}" == mongodb://* || "${SOURCE_MONGODB_URI}" == mongodb+srv://* ]] \
   || die 'SOURCE_MONGODB_URI must use mongodb:// or mongodb+srv://'
+[[ "${SOURCE_MONGODB_URI}" != *$'\n'* && "${SOURCE_MONGODB_URI}" != *$'\r'* ]] \
+  || die 'SOURCE_MONGODB_URI must be a single line'
+[[ "${SOURCE_MONGODB_URI}" != *"'"* ]] \
+  || die 'A literal apostrophe in SOURCE_MONGODB_URI must be URI-encoded'
 [[ "${SOURCE_MONGO_DB}" =~ ^[A-Za-z0-9_-]+$ ]] || die 'SOURCE_MONGO_DB contains unsupported characters'
 [[ "${TARGET_MONGO_DB}" =~ ^[A-Za-z0-9_-]+$ ]] || die 'TARGET_MONGO_DB contains unsupported characters'
-[[ "${TARGET_MONGO_DB}" == "${MONGO_DB}" ]] \
-  || die 'TARGET_MONGO_DB must match MONGO_DB from .env.docker'
+[[ "${SOURCE_MONGO_DB}" == 'test' ]] || die 'This checkpoint is restricted to remote database test'
+[[ "${TARGET_MONGO_DB}" == 'linkup_cms' ]] || die 'This checkpoint is restricted to local database linkup_cms'
+[[ "${TARGET_MONGO_DB}" == "${MONGO_DB}" ]] || die 'TARGET_MONGO_DB must match MONGO_DB from .env.docker'
+[[ "${MONGO_APP_USERNAME}" =~ ^[A-Za-z0-9._~-]+$ ]] || die 'Local Mongo username must be URI-safe'
+[[ "${MONGO_APP_PASSWORD}" =~ ^[A-Za-z0-9._~-]+$ ]] || die 'Local Mongo password must be URI-safe'
 
 command -v docker >/dev/null 2>&1 || die 'Docker CLI is not installed'
 command -v shasum >/dev/null 2>&1 || die 'shasum is required'
 docker info >/dev/null 2>&1 || die 'Docker is not running or is not accessible'
+
+readonly -a COMPOSE=(docker compose --project-directory "${ROOT_DIR}" --env-file "${DOCKER_ENV_FILE}" -f "${COMPOSE_FILE}")
 "${COMPOSE[@]}" config --quiet
 
-COMPOSE_PROJECT="$(sed -n -E 's/^name:[[:space:]]*([^[:space:]#]+).*/\1/p' "${COMPOSE_FILE}" | sed -n '1p')"
-[[ -n "${COMPOSE_PROJECT}" ]] || die 'compose.yaml must define a fixed project name'
-DB_NETWORK="${COMPOSE_PROJECT}_db"
-export COMPOSE_PROJECT DB_NETWORK SOURCE_MONGO_DB TARGET_MONGO_DB
-
-"${COMPOSE[@]}" up -d mongo >/dev/null
-wait_for_health mongo
-
 MONGO_CONTAINER_ID="$("${COMPOSE[@]}" ps --quiet mongo)"
+BACKEND_CONTAINER_ID="$("${COMPOSE[@]}" ps --quiet backend)"
+[[ -n "${MONGO_CONTAINER_ID}" ]] || die 'Local Mongo container is not running; no local state was changed'
+[[ -n "${BACKEND_CONTAINER_ID}" ]] || die 'Backend container is not running; no local state was changed'
 MONGO_IMAGE="$(docker inspect --format '{{.Config.Image}}' "${MONGO_CONTAINER_ID}")"
-[[ -n "${MONGO_IMAGE}" ]] || die 'Could not resolve the Mongo image'
-docker network inspect "${DB_NETWORK}" >/dev/null 2>&1 || die "Expected database network not found: ${DB_NETWORK}"
-resolve_local_volume
+BACKEND_IMAGE="$(docker inspect --format '{{.Config.Image}}' "${BACKEND_CONTAINER_ID}")"
+[[ -n "${MONGO_IMAGE}" && -n "${BACKEND_IMAGE}" ]] || die 'Could not resolve required container images'
 
-docker run --rm --entrypoint sh "${MONGO_IMAGE}" -eu -c \
-  'command -v mongosh >/dev/null; command -v mongodump >/dev/null; command -v mongorestore >/dev/null; mongorestore --help | grep -q -- --dryRun'
+SECRET_DIR="$(mktemp -d "${TMPDIR:-/tmp}/linkup-mongo-backup.XXXXXX")"
+chmod 700 "${SECRET_DIR}"
+SOURCE_URI_FILE="${SECRET_DIR}/source.uri"
+SOURCE_CONFIG="${SECRET_DIR}/source.yml"
+LOCAL_CONFIG="${SECRET_DIR}/local.yml"
+printf '%s' "${SOURCE_MONGODB_URI}" >"${SOURCE_URI_FILE}"
+printf "uri: '%s'\n" "${SOURCE_MONGODB_URI}" >"${SOURCE_CONFIG}"
+printf "uri: 'mongodb://%s:%s@mongo:27017/%s?authSource=%s'\n" \
+  "${MONGO_APP_USERNAME}" "${MONGO_APP_PASSWORD}" "${TARGET_MONGO_DB}" "${TARGET_MONGO_DB}" >"${LOCAL_CONFIG}"
+chmod 600 "${SOURCE_URI_FILE}" "${SOURCE_CONFIG}" "${LOCAL_CONFIG}"
 
-mkdir -p "${BACKUP_DIR}"
-chmod 700 "${BACKUP_DIR}"
+mkdir -p "${BACKUP_ROOT}"
+chmod 700 "${BACKUP_ROOT}"
+if [[ "${MODE}" == '--verify-existing' ]]; then
+  BACKUP_DIR="$(cd "$(dirname "${EXISTING_BACKUP_ARG}")" && pwd -P)/$(basename "${EXISTING_BACKUP_ARG}")"
+  [[ -d "${BACKUP_DIR}" ]] || die 'Existing backup directory was not found'
+  [[ "${BACKUP_DIR}" == "${BACKUP_ROOT}/remote-${SOURCE_MONGO_DB}-"* ]] \
+    || die 'Existing backup must be a timestamped source-database directory under .mongo-backups'
+  REMOTE_COUNTS_PATH="${BACKUP_DIR}/REMOTE_COUNTS.tsv"
+  require_file "${REMOTE_COUNTS_PATH}"
+  printf 'Reusing completed dump for verification: %s\n' "${BACKUP_DIR}"
+else
+  TIMESTAMP="$(date -u '+%Y%m%d-%H%M%S')"
+  BACKUP_DIR="${BACKUP_ROOT}/remote-${SOURCE_MONGO_DB}-${TIMESTAMP}"
+  mkdir "${BACKUP_DIR}"
+  chmod 700 "${BACKUP_DIR}"
+  REMOTE_COUNTS_PATH="${BACKUP_DIR}/REMOTE_COUNTS.tsv"
 
-COUNT_JS='const sourceDb = db.getSiblingDB(process.env.COUNT_DB); const ping = sourceDb.runCommand({ ping: 1 }); if (ping.ok !== 1) throw new Error("Mongo ping failed"); const names = sourceDb.getCollectionNames().filter((name) => !name.startsWith("system.")).sort(); for (const name of names) print(name + "\t" + sourceDb.getCollection(name).countDocuments({}));'
-export COUNT_JS
+  printf 'Collecting read-only remote collection counts...\n'
+  if ! docker run --rm \
+    --user 0:0 \
+    --env "COUNT_DB=${SOURCE_MONGO_DB}" \
+    --mount "type=bind,src=${SOURCE_URI_FILE},dst=/run/secrets/source.uri,readonly" \
+    --mount "type=bind,src=${COUNT_SCRIPT},dst=/app/remote-counts.js,readonly" \
+    --entrypoint node \
+    "${BACKEND_IMAGE}" /app/remote-counts.js >"${REMOTE_COUNTS_PATH}" 2>/dev/null; then
+    die 'Remote count discovery failed; local Mongo data was not changed'
+  fi
+fi
+[[ -s "${REMOTE_COUNTS_PATH}" ]] || die 'Remote counts manifest is empty'
 
-TIMESTAMP="$(date -u '+%Y%m%d-%H%M%S')"
-SAFE_SOURCE_DB="$(printf '%s' "${SOURCE_MONGO_DB}" | tr -cd 'A-Za-z0-9_-')"
-ARCHIVE_BASENAME="remote-${SAFE_SOURCE_DB}-${TIMESTAMP}.archive.gz"
-ARCHIVE_PATH="${BACKUP_DIR}/${ARCHIVE_BASENAME}"
-REMOTE_COUNTS_PATH="${BACKUP_DIR}/${ARCHIVE_BASENAME}.remote-counts.tsv"
-LOCAL_COUNTS_PATH="${BACKUP_DIR}/${ARCHIVE_BASENAME}.local-counts.tsv"
-CHECKSUM_PATH="${ARCHIVE_PATH}.sha256"
-export ARCHIVE_BASENAME
+COLLECTIONS=()
+while IFS=$'\t' read -r collection count extra; do
+  [[ -z "${extra:-}" ]] || die 'Unexpected remote count output'
+  [[ "${collection}" =~ ^[A-Za-z0-9_.-]+$ ]] || die 'A remote collection name is unsafe for this migration workflow'
+  [[ "${count}" =~ ^[0-9]+$ ]] || die "Invalid document count for collection ${collection}"
+  COLLECTIONS+=("${collection}")
+done <"${REMOTE_COUNTS_PATH}"
+(( ${#COLLECTIONS[@]} > 0 )) || die 'No remote collections were discovered'
 
-printf 'Testing read-only remote connection and collecting counts...\n'
-run_remote_counts "${REMOTE_COUNTS_PATH}"
-[[ -s "${REMOTE_COUNTS_PATH}" ]] || die 'Remote database has no discoverable application collections'
-printf 'Remote connection: PASS\n'
+if [[ "${MODE}" == 'backup' ]]; then
+  printf 'Remote connection: PASS\n'
+fi
+printf 'Remote database: %s\n' "${SOURCE_MONGO_DB}"
 printf 'Remote collection counts:\n'
 sed 's/^/  /' "${REMOTE_COUNTS_PATH}"
 
-printf 'Creating compressed remote database archive...\n'
-if ! docker run --rm \
-  --env SOURCE_MONGODB_URI \
-  --env SOURCE_MONGO_DB \
-  --env ARCHIVE_BASENAME \
-  --volume "${BACKUP_DIR}:/backup" \
-  --entrypoint sh \
-  "${MONGO_IMAGE}" \
-  -eu -c 'exec mongodump --quiet --uri="$SOURCE_MONGODB_URI" --db="$SOURCE_MONGO_DB" --archive="/backup/$ARCHIVE_BASENAME" --gzip' \
-  2>/dev/null; then
-  rm -f "${ARCHIVE_PATH}"
-  die 'Remote mongodump failed; local Mongo data was not changed'
+if [[ "${MODE}" == 'backup' ]]; then
+  printf 'Starting directory-format gzip backup with one collection at a time...\n'
+  FULL_DUMP_LOG="${SECRET_DIR}/full-dump.log"
+  if run_monitored_dump 'database'; then
+    FULL_DUMP_PASSED='true'
+  else
+    FULL_DUMP_PASSED='false'
+    printf 'Full dump did not complete; switching to collection-level fallback.\n'
+  fi
+  FULL_DUMP_LOG="${LAST_DUMP_LOG}"
+
+  if [[ "${FULL_DUMP_PASSED}" != 'true' ]]; then
+    for collection in "${COLLECTIONS[@]}"; do
+      if collection_complete_in_full_dump "${collection}"; then
+        size="$(stat -f '%z' "${BACKUP_DIR}/${SOURCE_MONGO_DB}/${collection}.bson.gz")"
+        printf '%s ALREADY_COMPLETE %s MB\n' "${collection}" "$(format_megabytes "${size}")"
+        continue
+      fi
+      rm -f \
+        "${BACKUP_DIR}/${SOURCE_MONGO_DB}/${collection}.bson.gz" \
+        "${BACKUP_DIR}/${SOURCE_MONGO_DB}/${collection}.metadata.json.gz"
+      run_monitored_dump "${collection}" --collection="${collection}" \
+        || die "Collection backup failed or stalled: ${collection}; local Mongo data was not changed"
+    done
+  fi
 fi
 
-[[ -f "${ARCHIVE_PATH}" ]] || die 'Backup archive was not created'
-ARCHIVE_SIZE_BYTES="$(wc -c <"${ARCHIVE_PATH}" | tr -d ' ')"
-[[ "${ARCHIVE_SIZE_BYTES}" =~ ^[0-9]+$ && "${ARCHIVE_SIZE_BYTES}" -gt 0 ]] || die 'Backup archive is empty'
+printf 'Verifying expected BSON and metadata files...\n'
+for collection in "${COLLECTIONS[@]}"; do
+  [[ -s "${BACKUP_DIR}/${SOURCE_MONGO_DB}/${collection}.bson.gz" ]] \
+    || die "Missing or empty BSON dump for ${collection}"
+  [[ -s "${BACKUP_DIR}/${SOURCE_MONGO_DB}/${collection}.metadata.json.gz" ]] \
+    || die "Missing or empty metadata for ${collection}"
+  gzip -t "${BACKUP_DIR}/${SOURCE_MONGO_DB}/${collection}.bson.gz" \
+    || die "Unreadable BSON gzip for ${collection}"
+  gzip -t "${BACKUP_DIR}/${SOURCE_MONGO_DB}/${collection}.metadata.json.gz" \
+    || die "Unreadable metadata gzip for ${collection}"
+  docker run --rm \
+    --mount "type=bind,src=${BACKUP_DIR},dst=/backup,readonly" \
+    --entrypoint sh \
+    "${MONGO_IMAGE}" \
+    -eu -c 'gzip -dc "$1" | bsondump --quiet --objcheck --type=debug --outFile=/dev/null' \
+    sh "/backup/${SOURCE_MONGO_DB}/${collection}.bson.gz" \
+    || die "MongoDB bsondump could not parse collection ${collection}"
+done
 
+READABILITY_LOG="${SECRET_DIR}/mongorestore-dry-run.log"
+DB_NETWORK='linkup-crm_db'
+docker network inspect "${DB_NETWORK}" >/dev/null 2>&1 || die "Expected local Docker network not found: ${DB_NETWORK}"
+if ! docker run --rm \
+  --network "${DB_NETWORK}" \
+  --mount "type=bind,src=${LOCAL_CONFIG},dst=/run/secrets/local.yml,readonly" \
+  --mount "type=bind,src=${BACKUP_DIR},dst=/backup,readonly" \
+  --entrypoint mongorestore \
+  "${MONGO_IMAGE}" \
+  --config=/run/secrets/local.yml \
+  --dir="/backup/${SOURCE_MONGO_DB}" \
+  --gzip \
+  --dryRun \
+  --verbose=2 >"${READABILITY_LOG}" 2>&1; then
+  die 'Backup readability dry-run failed; local Mongo data was not changed'
+fi
+for collection in "${COLLECTIONS[@]}"; do
+  if ! grep -Fq "${collection}" "${READABILITY_LOG}"; then
+    printf 'Dry-run log bytes: %s\n' "$(wc -c <"${READABILITY_LOG}" | tr -d ' ')" >&2
+    printf 'Safe namespaces observed in dry-run log:\n' >&2
+    grep -Eo '(test|linkup_cms)\.[A-Za-z0-9_.-]+' "${READABILITY_LOG}" | LC_ALL=C sort -u >&2 || true
+    die "Dry-run did not enumerate collection ${collection}"
+  fi
+done
+
+CHECKSUM_PATH="${BACKUP_DIR}/SHA256SUMS"
 (
   cd "${BACKUP_DIR}"
-  shasum -a 256 "${ARCHIVE_BASENAME}" >"${ARCHIVE_BASENAME}.sha256"
-  shasum -a 256 -c "${ARCHIVE_BASENAME}.sha256" >/dev/null
+  find . -type f ! -name SHA256SUMS -print | LC_ALL=C sort | while IFS= read -r file; do
+    shasum -a 256 "${file}"
+  done >SHA256SUMS
+  shasum -a 256 -c SHA256SUMS >/dev/null
 )
-ARCHIVE_SHA256="$(awk '{print $1}' "${CHECKSUM_PATH}")"
+[[ -s "${CHECKSUM_PATH}" ]] || die 'SHA-256 manifest was not created'
 
-printf 'Validating that mongorestore can read the archive without writing data...\n'
-run_restore dry-run >/dev/null
-
-printf 'Backup verification: PASS\n'
-printf 'Backup file: %s\n' "${ARCHIVE_BASENAME}"
-printf 'Backup size: %s bytes\n' "${ARCHIVE_SIZE_BYTES}"
-printf 'Backup SHA-256: %s\n' "${ARCHIVE_SHA256}"
-printf 'Exact local Mongo volume: %s\n' "${LOCAL_MONGO_VOLUME}"
-
-if [[ "${BACKUP_ONLY}" == '--backup-only' ]]; then
-  printf 'Backup-only mode complete. Local Mongo data was not changed.\n'
-  exit 0
-fi
-
+BACKUP_SIZE_BYTES="$(directory_size_bytes "${BACKUP_DIR}")"
+TOTAL_DOCUMENTS="$(awk -F '\t' '{ total += $2 } END { print total + 0 }' "${REMOTE_COUNTS_PATH}")"
+printf '\nRemote backup verification: PASS\n'
+printf 'Remote database: %s\n' "${SOURCE_MONGO_DB}"
+printf 'Target local database: %s\n' "${TARGET_MONGO_DB}"
+printf 'Collections backed up: %s\n' "${#COLLECTIONS[@]}"
+printf 'Remote documents: %s\n' "${TOTAL_DOCUMENTS}"
+printf 'Remote document counts:\n'
+sed 's/^/  /' "${REMOTE_COUNTS_PATH}"
+printf 'Backup directory: %s\n' "${BACKUP_DIR}"
+printf 'Backup total size: %s bytes (%s MB)\n' "${BACKUP_SIZE_BYTES}" "$(format_megabytes "${BACKUP_SIZE_BYTES}")"
+printf 'SHA-256 manifest: PASS (%s)\n' "${CHECKSUM_PATH}"
+printf 'Backup readability: PASS\n'
+printf 'Local Mongo data changed: NO\n'
 printf '\nWARNING:\n'
-printf 'This will permanently delete the LOCAL Docker MongoDB volume: %s\n' "${LOCAL_MONGO_VOLUME}"
-printf 'The REMOTE MongoDB will NOT be modified.\n'
-printf 'Type DELETE LOCAL MONGO to continue: '
-if [[ ! -t 0 ]]; then
-  printf '\n'
-  die 'Destructive phase requires an interactive terminal'
-fi
-read -r confirmation
-[[ "${confirmation}" == 'DELETE LOCAL MONGO' ]] || die 'Confirmation phrase did not match; local data was not deleted'
-
-printf 'Stopping only the %s Compose project...\n' "${COMPOSE_PROJECT}"
-"${COMPOSE[@]}" down
-
-labels="$(docker volume inspect --format '{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}' "${LOCAL_MONGO_VOLUME}")"
-[[ "${labels}" == "${COMPOSE_PROJECT}|mongo_data" ]] || die 'Refusing to delete a volume whose labels no longer match'
-printf 'Deleting confirmed local volume: %s\n' "${LOCAL_MONGO_VOLUME}"
-docker volume rm "${LOCAL_MONGO_VOLUME}" >/dev/null
-
-printf 'Creating a fresh local Mongo volume and accounts...\n'
-"${COMPOSE[@]}" up -d mongo >/dev/null
-wait_for_health mongo
-MONGO_CONTAINER_ID="$("${COMPOSE[@]}" ps --quiet mongo)"
-DB_NETWORK="${COMPOSE_PROJECT}_db"
-export DB_NETWORK
-
-printf 'Restoring remote application data into local %s...\n' "${TARGET_MONGO_DB}"
-run_restore restore
-
-run_local_counts "${LOCAL_COUNTS_PATH}"
-printf 'Local restored collection counts:\n'
-sed 's/^/  /' "${LOCAL_COUNTS_PATH}"
-if ! diff -u "${REMOTE_COUNTS_PATH}" "${LOCAL_COUNTS_PATH}"; then
-  die 'Remote and local document counts differ; backup remains available for diagnosis'
-fi
-printf 'Remote/local count comparison: PASS\n'
-
-printf 'Starting the complete local application...\n'
-"${COMPOSE[@]}" up -d
-wait_for_health mongo
-wait_for_health backend
-wait_for_health frontend
-wait_for_health nginx
-
-curl --fail --silent --show-error --output /dev/null http://localhost:8080/api/health
-curl --fail --silent --show-error --output /dev/null http://localhost:8080/api/companies
-(cd "${ROOT_DIR}" && bash scripts/docker-smoke-test.sh)
-
-printf 'Migration completed successfully.\n'
-printf 'Backup retained at: %s\n' "${ARCHIVE_PATH}"
-printf 'Do not run the seed command against restored server data.\n'
+printf 'The next step permanently deletes the LOCAL Docker Mongo volume linkup-crm_mongo_data.\n'
+printf 'Remote MongoDB will not be modified.\n'
+printf 'Type exactly: DELETE LOCAL MONGO\n'
