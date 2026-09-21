@@ -12,6 +12,15 @@ const app = express();
 connectDB();
 
 // Middleware
+const configuredOrigins = [
+  process.env.FRONTEND_URL,
+  process.env.ALLOWED_ORIGINS,
+]
+  .filter(Boolean)
+  .flatMap((origins) => origins.split(','))
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
@@ -20,6 +29,7 @@ const allowedOrigins = [
   'http://localhost:5173',
   'https://linkup-group-crm.vercel.app',
   'https://linkup-admin-frontend.vercel.app',
+  ...configuredOrigins,
 ];
 
 app.use(cors({
