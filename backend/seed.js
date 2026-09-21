@@ -3,7 +3,6 @@ dotenv.config();
 
 const connectDB = require('./config/db');
 const Company = require('./models/Company');
-const Admin = require('./models/Admin');
 const Service = require('./models/Service');
 const Project = require('./models/Project');
 const Blog = require('./models/Blog');
@@ -14,20 +13,6 @@ const seedData = async () => {
     await connectDB();
 
     console.log('Seeding initial database content...');
-
-    // Seed Admin
-    const adminEmail = 'admin@linkup.com';
-    let admin = await Admin.findOne({ email: adminEmail });
-    if (!admin) {
-      admin = await Admin.create({
-        name: 'Super Admin',
-        email: adminEmail,
-        password: 'admin123',
-        role: 'admin',
-        isSuperAdmin: true
-      });
-      console.log('Default admin created: admin@linkup.com / admin123');
-    }
 
     // Seed Companies
     const defaultCompanies = [

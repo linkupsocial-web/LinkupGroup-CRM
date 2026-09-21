@@ -15,12 +15,16 @@ dist/
 # Environment files
 .env
 .env.docker
+.env.migration
 .env.production
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
 .env*.local
+
+# Local MongoDB migration archives and count manifests
+.mongo-backups/
 
 # Logs
 *.log

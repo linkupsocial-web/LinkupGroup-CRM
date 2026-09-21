@@ -11,7 +11,7 @@ ENV NODE_ENV=production \
     PORT=5000
 
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
-COPY --chown=node:node package.json package-lock.json index.js ./
+COPY --chown=node:node package.json package-lock.json index.js seed.js ./
 COPY --chown=node:node config ./config
 COPY --chown=node:node middleware ./middleware
 COPY --chown=node:node models ./models
