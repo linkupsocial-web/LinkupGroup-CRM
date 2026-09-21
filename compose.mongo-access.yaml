@@ -1,0 +1,11 @@
+services:
+  mongo:
+    ports:
+      - "127.0.0.1:27017:27017"
+    networks:
+      - db
+      - mongo_access
+
+networks:
+  mongo_access:
+    driver: bridge
