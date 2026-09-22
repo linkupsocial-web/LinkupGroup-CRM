@@ -68,8 +68,18 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: '15mb' }));
-app.use(express.urlencoded({ extended: true, limit: '15mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`[${new Date().toLocaleTimeString()}] ${req.method} ${req.originalUrl}`);
+  next();
+});
+
+// Automatic Base64 -> Cloudinary converter middleware
+const autoCloudinary = require('./middleware/autoCloudinary');
+app.use('/api', autoCloudinary);
 
 // Health Check
 app.get('/api/health', (req, res) => {
