@@ -20,6 +20,8 @@ const allowedOrigins = [
   'http://localhost:5173',
   'https://linkup-group-crm.vercel.app',
   'https://linkup-admin-frontend.vercel.app',
+   "https://ashubudholiya.com",
+  "https://www.ashubudholiya.com"
 ];
 
 app.use(cors({
