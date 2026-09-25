@@ -49,12 +49,27 @@ export default function RichTextEditor({
   placeholder = 'Start writing your amazing blog post...',
   rows = 10
 }: RichTextEditorProps) {
-  // Normalize string/array content
+  // Normalize string/array content into proper HTML block elements
   const getNormalizedContent = (val: string | string[]) => {
     if (Array.isArray(val)) {
-      return val.join('\n\n');
+      val = val.join('\n\n');
     }
-    return val || '';
+    if (!val || typeof val !== 'string') return '';
+    const trimmed = val.trim();
+    if (!trimmed) return '';
+
+    // If already contains HTML block tags (<p>, <h1>, <div>, <ul>, etc.)
+    if (/<(p|h[1-6]|div|ul|ol|blockquote|table|pre|hr|img|article|section)[^>]*>/i.test(trimmed)) {
+      return trimmed;
+    }
+
+    // Convert plain text / raw newlines into independent <p> blocks
+    return trimmed
+      .split(/\r?\n+/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => `<p>${line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`)
+      .join('');
   };
 
   const initialContent = getNormalizedContent(value);
@@ -142,6 +157,52 @@ export default function RichTextEditor({
       </div>
     );
   }
+
+  // Precise Heading toggle handler (handles both cursor position & selected text substring)
+  const handleToggleHeading = (level: 1 | 2 | 3) => {
+    if (!editor) return;
+
+    // If this heading level is already active, convert back to a normal paragraph
+    if (editor.isActive('heading', { level })) {
+      editor.chain().focus().setParagraph().run();
+      return;
+    }
+
+    const { from, to, empty } = editor.state.selection;
+
+    // 1. If no text is selected: set heading on the current line/block
+    if (empty) {
+      editor.chain().focus().setHeading({ level }).run();
+      return;
+    }
+
+    const $from = editor.state.selection.$from;
+    const $to = editor.state.selection.$to;
+    const isSameBlock = $from.sameParent($to);
+
+    // 2. If user selected a specific portion/substring inside a block:
+    if (isSameBlock && $from.parent.type.name === 'paragraph') {
+      const parentStart = $from.start();
+      const parentEnd = $from.end();
+      const isFullBlockSelected = from <= parentStart && to >= parentEnd;
+
+      if (!isFullBlockSelected) {
+        const selectedText = editor.state.doc.textBetween(from, to, ' ');
+        if (selectedText.trim()) {
+          editor.chain().focus()
+            .deleteSelection()
+            .splitBlock()
+            .setHeading({ level })
+            .insertContent(selectedText)
+            .run();
+          return;
+        }
+      }
+    }
+
+    // 3. If full block or multiple blocks are selected
+    editor.chain().focus().setHeading({ level }).run();
+  };
 
   // Formatting actions
   const toggleLink = () => {
@@ -298,30 +359,30 @@ export default function RichTextEditor({
             {/* Headings: H1, H2, H3 */}
             <button
               type="button"
-              onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+              onClick={() => handleToggleHeading(1)}
               title="Heading 1"
               className={`px-1.5 py-1 rounded-md text-xs font-bold transition-colors cursor-pointer ${
-                editor.isActive('heading', { level: 1 }) ? 'bg-slate-200 text-slate-900' : 'text-slate-700 hover:text-slate-900 hover:bg-slate-100'
+                editor.isActive('heading', { level: 1 }) ? 'bg-slate-200 text-slate-900 font-extrabold' : 'text-slate-700 hover:text-slate-900 hover:bg-slate-100'
               }`}
             >
               H1
             </button>
             <button
               type="button"
-              onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+              onClick={() => handleToggleHeading(2)}
               title="Heading 2"
               className={`px-1.5 py-1 rounded-md text-xs font-bold transition-colors cursor-pointer ${
-                editor.isActive('heading', { level: 2 }) ? 'bg-slate-200 text-slate-900' : 'text-slate-700 hover:text-slate-900 hover:bg-slate-100'
+                editor.isActive('heading', { level: 2 }) ? 'bg-slate-200 text-slate-900 font-extrabold' : 'text-slate-700 hover:text-slate-900 hover:bg-slate-100'
               }`}
             >
               H2
             </button>
             <button
               type="button"
-              onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
+              onClick={() => handleToggleHeading(3)}
               title="Heading 3"
               className={`px-1.5 py-1 rounded-md text-xs font-bold transition-colors cursor-pointer ${
-                editor.isActive('heading', { level: 3 }) ? 'bg-slate-200 text-slate-900' : 'text-slate-700 hover:text-slate-900 hover:bg-slate-100'
+                editor.isActive('heading', { level: 3 }) ? 'bg-slate-200 text-slate-900 font-extrabold' : 'text-slate-700 hover:text-slate-900 hover:bg-slate-100'
               }`}
             >
               H3
